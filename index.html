@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
   <!-- Fallback por si el CSS no carga (evita modal visible por defecto) -->
@@ -10,27 +11,32 @@
 
   <!-- CSS principal -->
   <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="icon" href="data:,"> <!-- evita 404 de favicon -->
 
-  <!-- Librerías externas -->
+  <!-- Librerías externas (orden importante) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- SUPABASE CONFIG (rellena estas 2 líneas con tus credenciales del proyecto) -->
+  <!-- SUPABASE CONFIG (usa las credenciales de tu proyecto) -->
   <script>
-    // 👉 Pega aquí tus valores de Supabase (Project URL y anon key).
-    // Ejemplo:
-    // window.SB_URL = "https://xxxxx.supabase.co";
-    // window.SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....";
-    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";   // <--- RELLENAR
-    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";   // <--- RELLENAR
+    // Si ya configuraste variables en Vercel, puedes dejar esto vacío y tu script.js las leerá.
+    // Para sitios 100% estáticos, define aquí:
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
-  <!-- Tu JS principal (versión con Supabase que te pasé) -->
+  <!-- Tu JS principal (versión con Supabase) -->
   <script src="./script.js?v=3" defer></script>
 </head>
 <body>
+  <noscript>
+    <div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">
+      Esta aplicación requiere JavaScript habilitado.
+    </div>
+  </noscript>
+
   <header class="topbar">
     <div class="brand">
       <div class="logo" aria-hidden="true"></div>
@@ -39,7 +45,7 @@
 
     <div style="display:flex; gap:8px; align-items:center">
       <!-- Botón oculto para abrir admin -->
-      <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador">●</button>
+      <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
       <!-- Botón de sesión -->
       <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
     </div>
@@ -49,7 +55,10 @@
     <!-- FORMULARIO -->
     <section class="card" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
-      <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento). Ingrese las horas y se calcularán los créditos automáticamente.</p>
+      <p class="help">
+        Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).
+        Ingrese las horas y se calcularán los créditos automáticamente.
+      </p>
 
       <form id="registroForm" novalidate>
         <div class="grid">
@@ -58,11 +67,20 @@
           </label>
 
           <label>Celular (GT) *
-            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" />
+            <input
+              type="tel"
+              name="telefono"
+              id="telefono"
+              required
+              placeholder="+502 55555555"
+              inputmode="numeric"
+              pattern="(?:\+?502)?\s?\d{8}"
+              autocomplete="tel-national"
+            />
           </label>
 
           <label>Número de colegiado (opcional)
-            <input type="text" name="colegiadoNumero" id="colegiadoNumero" maxlength="20" />
+            <input type="text" name="colegiadoNumero" id="colegiadoNumero" maxlength="20" autocomplete="off" />
           </label>
 
           <label>¿Colegiado activo?*
@@ -109,9 +127,17 @@
 
         <!-- CARGA DE ARCHIVOS -->
         <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de archivo">
-          <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
+          <input
+            type="file"
+            id="archivo"
+            accept="application/pdf,image/png,image/jpg,image/jpeg"
+            hidden
+          />
           <div class="uploader-inner">
-            <p><strong>Arrastre y suelte</strong> su comprobante (PDF, JPG, PNG, JPEG) o <button type="button" class="linklike" id="browseBtn">examinar</button></p>
+            <p>
+              <strong>Arrastre y suelte</strong> su comprobante (PDF, JPG, PNG, JPEG) o
+              <button type="button" class="linklike" id="browseBtn">examinar</button>
+            </p>
             <p class="hint">Tamaño máximo: 10 MB</p>
             <div id="preview" class="preview" aria-live="polite"></div>
           </div>
@@ -204,10 +230,10 @@
       </header>
       <div style="padding:12px">
         <label>Email
-          <input type="email" id="authEmail" placeholder="correo@dominio.com" />
+          <input type="email" id="authEmail" placeholder="correo@dominio.com" autocomplete="email" autocapitalize="off" />
         </label>
         <label>Contraseña
-          <input type="password" id="authPass" placeholder="********" />
+          <input type="password" id="authPass" placeholder="********" autocomplete="current-password" />
         </label>
         <div class="actions" style="margin-top:10px">
           <button class="btn primary" id="doLogin" type="button">Entrar</button>
