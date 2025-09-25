@@ -142,4 +142,314 @@ doSignup?.addEventListener('click', async ()=>{
   authState.textContent = 'Creando cuenta...';
   const { error } = await supabase.auth.signUp({ email: authEmail.value.trim(), password: authPass.value });
   if(error) return authState.textContent = 'Error: '+error.message;
-  authState.textContent = 'Cu
+  authState.textContent = 'Cuenta creada. Sesión iniciada.';
+  closeModal(authModal); await loadAndRender();
+});
+
+doLogin?.addEventListener('click', async ()=>{
+  authState.textContent = 'Ingresando...';
+  const { error } = await supabase.auth.signInWithPassword({ email: authEmail.value.trim(), password: authPass.value });
+  if(error) return authState.textContent = 'Error: '+error.message;
+  authState.textContent = 'OK';
+  closeModal(authModal); await loadAndRender();
+});
+
+// Mostrar estado sesión en botón
+supabase?.auth.onAuthStateChange(async (_evt, session)=>{
+  authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
+});
+
+/* =======================================================
+   Datos (Supabase)
+======================================================= */
+async function loadAndRender(){
+  const { data: session } = await supabase.auth.getSession();
+  if(!session?.session){ tablaBody.innerHTML=''; return; }
+  const { data, error } = await supabase
+    .from('registros')
+    .select('*')
+    .order('created_at', { ascending:false });
+  if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
+  renderTabla(data);
+}
+
+function renderTabla(rows){
+  tablaBody.innerHTML='';
+  for(const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${sanitize(r.correlativo)}</td>
+      <td>${sanitize(r.fecha)}</td>
+      <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,30))}${r.actividad.length>30?'…':''}</td>
+      <td>${r.horas}</td>
+      <td>${r.creditos}</td>
+      <td><button class="btn" data-id="${r.id}" data-action="pdf">PDF</button></td>`;
+    tablaBody.appendChild(tr);
+  }
+}
+
+tablaBody.addEventListener('click', async (e)=>{
+  const btn = e.target.closest('button[data-action="pdf"]');
+  if(!btn) return;
+  const id = btn.getAttribute('data-id');
+  const { data: rows, error } = await supabase.from('registros').select('*').eq('id', id).limit(1);
+  if(error || !rows?.length) return showToast('Registro no disponible','error');
+  await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+});
+
+/* =======================================================
+   Submit (insert en Supabase + Storage)
+======================================================= */
+form.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+
+  const { data: s } = await supabase.auth.getSession();
+  if(!s?.session){ showToast('Inicia sesión para registrar', 'error'); return; }
+  const user = s.session.user;
+
+  // Validaciones
+  const nombre = form.nombre.value.trim();
+  const telefono = form.telefono.value.trim();
+  const colegiadoNumero = form.colegiadoNumero.value.trim();
+  const colegiadoActivo = form.colegiadoActivo.value;
+  const actividad = form.actividad.value.trim();
+  const institucion = form.institucion.value.trim();
+  const tipo = form.tipo.value;
+  const fecha = form.fecha.value;
+  const horas = Number(form.horas.value);
+  const observaciones = obsEl.value.trim();
+
+  if(!nombre || !telefono || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas)
+    return showToast('Complete los campos obligatorios (*)', 'error');
+  if(!phoneValidGT(telefono)) return showToast('Teléfono inválido (+502 ########)', 'error');
+  if(!withinFiveYears(fecha)) return showToast('Fecha inválida (no futura, ≤ 5 años)', 'error');
+  if(!(horas>=0.5 && horas<=200)) return showToast('Horas fuera de rango (0.5 a 200).', 'error');
+  if(observaciones.length>250) return showToast('Observaciones exceden 250 caracteres.', 'error');
+  if(fileRef){
+    if(!ALLOWED_MIME.includes(fileRef.type)) return showToast('Archivo no permitido.', 'error');
+    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB) return showToast('Archivo supera 10 MB.', 'error');
+  }
+
+  // Correlativo atómico (servidor)
+  const { data: corrData, error: corrErr } = await supabase.rpc('next_correlativo');
+  if(corrErr || !corrData) return showToast('No se pudo obtener correlativo', 'error');
+  const correlativo = corrData;
+
+  const creditos = calcCreditos(horas);
+  const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
+
+  // Subir archivo a Storage (opcional)
+  let archivo_url = null, archivo_mime = null;
+  if(fileRef){
+    const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path = `${user.id}/${correlativo}-${safeName}`;
+    const { error: upErr } = await supabase.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+    if(upErr) return showToast('No se pudo subir el archivo','error');
+    archivo_url = path; archivo_mime = fileRef.type;
+  }
+
+  // Insertar registro
+  const payload = {
+    usuario_id: user.id,
+    correlativo,
+    nombre, telefono, colegiado_numero: colegiadoNumero, colegiado_activo: colegiadoActivo,
+    actividad, institucion, tipo, fecha,
+    horas, creditos, observaciones,
+    archivo_url, archivo_mime,
+    hash
+  };
+
+  const { data: inserted, error: insErr } = await supabase.from('registros').insert(payload).select().single();
+  if(insErr){ console.error(insErr); return showToast('No se pudo guardar el registro','error'); }
+
+  // PDF
+  await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
+  showToast('Registro guardado y constancia generada.');
+  form.reset(); preview.innerHTML=''; creditosEl.value='';
+  loadAndRender();
+});
+
+/* =======================================================
+   Panel Admin (local; exporta registros del usuario)
+======================================================= */
+function openAdmin(){ adminModal.setAttribute('aria-hidden','false'); adminPass.value=''; }
+function closeAdminFn(){ adminModal.setAttribute('aria-hidden','true'); adminBody.hidden=true; adminAuth.hidden=false; adminPass.value=''; }
+openAdminBtn.addEventListener('click', openAdmin);
+closeAdmin.addEventListener('click', closeAdminFn);
+window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
+
+let adminSessionEnd = 0;
+function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
+function adminSessionValid(){ return Date.now() < adminSessionEnd; }
+
+adminLogin.addEventListener('click', async (ev)=>{
+  ev.preventDefault();
+  if((adminPass.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
+  adminAuth.hidden = true; adminBody.hidden = false; startAdminSession(); await renderAdmin(); showToast('Sesión admin iniciada','ok');
+});
+
+async function renderAdmin(){
+  const { data: rows, error } = await supabase.from('registros').select('*').order('created_at', { ascending:false });
+  if(error){ exportStatus.textContent='Error al cargar'; return; }
+  adminTbody.innerHTML='';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${sanitize(r.correlativo)}</td>
+      <td>${sanitize(r.nombre)}</td>
+      <td>${sanitize(r.telefono)}</td>
+      <td>${sanitize(r.colegiado_numero||'')}</td>
+      <td>${sanitize(r.colegiado_activo)}</td>
+      <td>${sanitize(r.actividad)}</td>
+      <td>${sanitize(r.institucion)}</td>
+      <td>${sanitize(r.tipo)}</td>
+      <td>${sanitize(r.fecha)}</td>
+      <td>${r.horas}</td>
+      <td>${r.creditos}</td>
+      <td>${r.archivo_url||''}</td>
+      <td>${sanitize(r.hash)}</td>
+      <td>${r.exportado? 'Sí':'No'}</td>`;
+    adminTbody.appendChild(tr);
+  }
+}
+
+setInterval(()=>{ if(!adminBody.hidden && !adminSessionValid()){ showToast('Sesión admin expirada','warn'); adminBody.hidden=true; adminAuth.hidden=false; adminPass.value=''; } }, 2000);
+
+exportCSVBtn.addEventListener('click', async ()=>{
+  if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+  const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
+  if(!rows?.length) return showToast('Sin registros','warn');
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(',')].concat(
+    rows.map(o=> `"${headers.map(h=>String(o[h]??'').replace(/"/g,'""')).join('","')}"`)
+  ).join('\n');
+  const blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`registros_cpg_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  exportStatus.textContent='CSV descargado';
+});
+
+exportXLSXBtn.addEventListener('click', async ()=>{
+  if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+  const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
+  if(!rows?.length) return showToast('Sin registros','warn');
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Registros');
+  XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
+  exportStatus.textContent='Excel descargado';
+});
+
+clearDataBtn.addEventListener('click', ()=>{
+  showToast('Con Supabase, “borrar todo” no está habilitado aquí. Usa la consola si lo necesitas.','warn');
+});
+
+/* =======================================================
+   PDF + QR (robusto; no falla si el QR no carga)
+======================================================= */
+async function generarConstanciaPDF(rec){
+  // Validaciones de librerías
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    console.error('jsPDF no está disponible. Revisa el <script> de jsPDF en index.html.');
+    showToast('jsPDF no cargó. Revisa conexión/librerías.', 'error');
+    throw new Error('jsPDF missing');
+  }
+  const { jsPDF } = window.jspdf;
+
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const pad = 48;
+
+  // Encabezado
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
+  doc.setFontSize(11); doc.setFont('helvetica','normal');
+  doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
+
+  // Correlativo
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text(`No. ${rec.correlativo}`, pad, 112);
+
+  // Datos
+  doc.setFont('helvetica','normal'); doc.setFontSize(12);
+  const lines = [
+    `Nombre: ${rec.nombre}`,
+    `Teléfono: ${rec.telefono}`,
+    `Colegiado No.: ${(rec.colegiado_numero ?? rec.colegiadoNumero) || '—'} (Activo: ${(rec.colegiado_activo ?? rec.colegiadoActivo) || '—'})`,
+    `Actividad: ${rec.actividad}`,
+    `Institución: ${rec.institucion}`,
+    `Tipo: ${rec.tipo}`,
+    `Fecha: ${rec.fecha}`,
+    `Horas: ${rec.horas}`,
+    `Créditos (16h = 1): ${rec.creditos}`,
+  ];
+  let y = 140; const lineH = 18;
+  for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
+  if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
+
+  // QR (intenta, pero no rompe si falla)
+  try {
+    const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
+    const qrDataUrl = await getQrDataUrl(verifyUrl, 96);
+    if (qrDataUrl) {
+      doc.addImage(qrDataUrl, 'PNG', 450, 64, 96, 96);
+      doc.setFontSize(10); doc.setTextColor(120);
+      doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790);
+      doc.text(verifyUrl, pad, 805, { maxWidth: 500 });
+    }
+  } catch (err) {
+    console.warn('QR no pudo generarse, se continúa sin QR:', err);
+  }
+
+  // Pie
+  doc.setFontSize(10); doc.setTextColor(120);
+  if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
+
+  doc.save(`Constancia_${rec.correlativo}.pdf`);
+}
+
+// Helpers QR/Canvas
+function getBase64Image(img){
+  const canvas=document.createElement('canvas');
+  canvas.width=img.naturalWidth || img.width;
+  canvas.height=img.naturalHeight || img.height;
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(img,0,0);
+  return canvas.toDataURL('image/png');
+}
+function getBase64FromCanvas(canvas){
+  try { return canvas.toDataURL('image/png'); }
+  catch(e){ console.error('No se pudo leer canvas como dataURL:', e); return null; }
+}
+async function getQrDataUrl(text, size=96){
+  if (typeof QRCode === 'undefined') {
+    console.warn('QRCode.js no está disponible. Revisa el <script> qrcode.min.js en index.html');
+    return null;
+  }
+  return new Promise((resolve)=>{
+    const tmp = document.createElement('div');
+    new QRCode(tmp, { text, width:size, height:size, correctLevel: QRCode.CorrectLevel.M });
+    const img = tmp.querySelector('img');
+    const canvas = tmp.querySelector('canvas');
+
+    if (canvas) {
+      return resolve(getBase64FromCanvas(canvas));
+    }
+    if (img) {
+      if (img.complete) {
+        try { return resolve(getBase64Image(img)); } catch { return resolve(null); }
+      } else {
+        img.onload = () => { try { resolve(getBase64Image(img)); } catch { resolve(null); } };
+        img.onerror = () => resolve(null);
+      }
+      return;
+    }
+    resolve(null);
+  });
+}
+
+/* =======================================================
+   Carga inicial
+======================================================= */
+loadAndRender();
+upZone.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); }});
