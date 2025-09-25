@@ -1,0 +1,75 @@
+<!doctype html>
+<thead>
+<tr>
+<th>Correlativo</th>
+<th>Fecha</th>
+<th>Actividad</th>
+<th>Horas</th>
+<th>Créditos</th>
+<th>Constancia</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+</section>
+</main>
+
+<!-- Panel administrador (modal) -->
+<div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
+<div class="modal-content" role="document">
+<header class="modal-header">
+<h3 id="adminTitle">Panel de Administrador</h3>
+<button class="iconbtn" id="closeAdmin">✕</button>
+</header>
+
+<div id="adminAuth">
+<p>Ingrese contraseña de administrador:</p>
+<input type="password" id="adminPass" placeholder="••••••" />
+<div class="actions">
+<button class="btn primary" id="adminLogin">Ingresar</button>
+</div>
+</div>
+
+<div id="adminBody" hidden>
+<div class="admin-actions">
+<button class="btn" id="exportCSV">Exportar CSV</button>
+<button class="btn" id="exportXLSX">Exportar Excel</button>
+<button class="btn warn" id="clearData">Borrar todo (local)</button>
+<span class="muted" id="exportStatus">—</span>
+</div>
+<div class="table-wrap">
+<table class="table" id="adminTable">
+<thead>
+<tr>
+<th>Correlativo</th>
+<th>Nombre</th>
+<th>Teléfono</th>
+<th>Colegiado</th>
+<th>Activo</th>
+<th>Actividad</th>
+<th>Institución</th>
+<th>Tipo</th>
+<th>Fecha</th>
+<th>Horas</th>
+<th>Créditos</th>
+<th>Archivo</th>
+<th>Hash</th>
+<th>Exportado</th>
+</tr>
+</thead>
+<tbody></tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Toasts -->
+<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<footer class="foot">
+<small>© 2025 — MVP local. Para producción agregar backend y base de datos.</small>
+</footer>
+</body>
+</html>
