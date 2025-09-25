@@ -1,9 +1,11 @@
+<!doctype html>
+<html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Fallback por si styles.css no carga -->
+  <!-- Fallback por si el CSS no carga (evita modal visible) -->
   <style>.modal{display:none}</style>
 
   <!-- CSS principal -->
@@ -17,84 +19,171 @@
   <!-- Tu JS -->
   <script src="./script.js?v=2" defer></script>
 </head>
-<!doctype html>
-<thead>
-<tr>
-<th>Correlativo</th>
-<th>Fecha</th>
-<th>Actividad</th>
-<th>Horas</th>
-<th>Créditos</th>
-<th>Constancia</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-</div>
-</section>
-</main>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <h1>Registro de Créditos Académicos</h1>
+    </div>
+    <!-- Botón oculto para abrir admin -->
+    <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador">●</button>
+  </header>
 
-<!-- Panel administrador (modal) -->
-<div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
-  <div class="modal-content" role="document">
-    <header class="modal-header">
-      <h3 id="adminTitle">Panel de Administrador</h3>
-      <!-- AÑADE type="button" -->
-      <button class="iconbtn" id="closeAdmin" type="button">✕</button>
-    </header>
+  <main class="container">
+    <!-- FORMULARIO -->
+    <section class="card" aria-labelledby="formTitle">
+      <h2 id="formTitle">Nueva actividad científico-académica</h2>
+      <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento). Ingrese las horas y se calcularán los créditos automáticamente.</p>
 
-    <div id="adminAuth">
-      <p>Ingrese contraseña de administrador:</p>
-      <input type="password" id="adminPass" placeholder="••••••" />
-      <div class="actions">
-        <!-- AÑADE type="button" -->
-        <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+      <form id="registroForm" novalidate>
+        <div class="grid">
+          <label>Nombre completo*
+            <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
+          </label>
+
+          <label>Celular (GT) *
+            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" />
+          </label>
+
+          <label>Número de colegiado (opcional)
+            <input type="text" name="colegiadoNumero" id="colegiadoNumero" maxlength="20" />
+          </label>
+
+          <label>¿Colegiado activo?*
+            <select name="colegiadoActivo" id="colegiadoActivo" required>
+              <option value="">— Seleccione —</option>
+              <option value="Sí">Sí</option>
+              <option value="No">No</option>
+            </select>
+          </label>
+
+          <label>Nombre de la actividad*
+            <input type="text" name="actividad" id="actividad" required maxlength="140" />
+          </label>
+
+          <label>Institución / Organizador*
+            <input type="text" name="institucion" id="institucion" required maxlength="140" />
+          </label>
+
+          <label>Tipo de actividad*
+            <select name="tipo" id="tipo" required>
+              <option value="">— Seleccione —</option>
+              <option>Teórica</option>
+              <option>Práctica</option>
+              <option>Voluntariado profesional</option>
+            </select>
+          </label>
+
+          <label>Fecha de la actividad*
+            <input type="date" name="fecha" id="fecha" required />
+          </label>
+
+          <label>Horas registradas* (admite decimales)
+            <input type="number" step="0.5" min="0.5" max="200" name="horas" id="horas" required />
+          </label>
+
+          <label>Créditos calculados
+            <input type="text" id="creditos" readonly />
+          </label>
+        </div>
+
+        <label>Observaciones (máx. 250 caracteres)
+          <textarea id="observaciones" maxlength="250" rows="3" placeholder="Opcional"></textarea>
+        </label>
+
+        <!-- CARGA DE ARCHIVOS -->
+        <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de archivo">
+          <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
+          <div class="uploader-inner">
+            <p><strong>Arrastre y suelte</strong> su comprobante (PDF, JPG, PNG, JPEG) o <button type="button" class="linklike" id="browseBtn">examinar</button></p>
+            <p class="hint">Tamaño máximo: 10 MB</p>
+            <div id="preview" class="preview" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn primary">Registrar y generar constancia</button>
+          <button type="reset" class="btn">Limpiar</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- HISTORIAL DE REGISTROS (SESION) -->
+    <section class="card" aria-labelledby="histTitle">
+      <h2 id="histTitle">Mis registros (sesión actual)</h2>
+      <div class="table-wrap">
+        <table id="tablaRegistros" class="table">
+          <thead>
+            <tr>
+              <th>Correlativo</th>
+              <th>Fecha</th>
+              <th>Actividad</th>
+              <th>Horas</th>
+              <th>Créditos</th>
+              <th>Constancia</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL ADMIN -->
+  <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
+    <div class="modal-content" role="document">
+      <header class="modal-header">
+        <h3 id="adminTitle">Panel de Administrador</h3>
+        <button class="iconbtn" id="closeAdmin" type="button">✕</button>
+      </header>
+
+      <div id="adminAuth">
+        <p>Ingrese contraseña de administrador:</p>
+        <input type="password" id="adminPass" placeholder="••••••" />
+        <div class="actions">
+          <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+        </div>
+      </div>
+
+      <div id="adminBody" hidden>
+        <div class="admin-actions">
+          <button class="btn" id="exportCSV">Exportar CSV</button>
+          <button class="btn" id="exportXLSX">Exportar Excel</button>
+          <button class="btn warn" id="clearData">Borrar todo (local)</button>
+          <span class="muted" id="exportStatus">—</span>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="adminTable">
+            <thead>
+              <tr>
+                <th>Correlativo</th>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Colegiado</th>
+                <th>Activo</th>
+                <th>Actividad</th>
+                <th>Institución</th>
+                <th>Tipo</th>
+                <th>Fecha</th>
+                <th>Horas</th>
+                <th>Créditos</th>
+                <th>Archivo</th>
+                <th>Hash</th>
+                <th>Exportado</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
-    ...
+  </div>
 
-  <button class="iconbtn" id="closeAdmin" type="button">✕</button>
-    <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
-</div>
-<div id="adminBody" hidden>
-<div class="admin-actions">
-<button class="btn" id="exportCSV">Exportar CSV</button>
-<button class="btn" id="exportXLSX">Exportar Excel</button>
-<button class="btn warn" id="clearData">Borrar todo (local)</button>
-<span class="muted" id="exportStatus">—</span>
-</div>
-<div class="table-wrap">
-<table class="table" id="adminTable">
-<thead>
-<tr>
-<th>Correlativo</th>
-<th>Nombre</th>
-<th>Teléfono</th>
-<th>Colegiado</th>
-<th>Activo</th>
-<th>Actividad</th>
-<th>Institución</th>
-<th>Tipo</th>
-<th>Fecha</th>
-<th>Horas</th>
-<th>Créditos</th>
-<th>Archivo</th>
-<th>Hash</th>
-<th>Exportado</th>
-</tr>
-</thead>
-<tbody></tbody>
-</table>
-</div>
-</div>
-</div>
-</div>
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-<!-- Toasts -->
-<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-
-<footer class="foot">
-<small>© 2025 — MVP local. Para producción agregar backend y base de datos.</small>
-</footer>
+  <footer class="foot">
+    <small>© 2025 — MVP local. Para producción agregar backend y base de datos.</small>
+  </footer>
 </body>
 </html>
