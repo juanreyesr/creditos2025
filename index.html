@@ -1,28 +1,34 @@
 <!doctype html>
 <html lang="es">
-  <!-- Supabase JS -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Fallback por si el CSS no carga (evita modal visible) -->
+  <!-- Fallback por si el CSS no carga (evita modal visible por defecto) -->
   <style>.modal{display:none}</style>
 
   <!-- CSS principal -->
   <link rel="stylesheet" href="./styles.css?v=2" />
 
-  <!-- Librerías (orden con defer) -->
+  <!-- Librerías externas -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
-<!-- Supabase JS -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- Tu JS -->
-  <script src="./script.js?v=2" defer></script>
+  <!-- SUPABASE CONFIG (rellena estas 2 líneas con tus credenciales del proyecto) -->
+  <script>
+    // 👉 Pega aquí tus valores de Supabase (Project URL y anon key).
+    // Ejemplo:
+    // window.SB_URL = "https://xxxxx.supabase.co";
+    // window.SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....";
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";   // <--- RELLENAR
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";   // <--- RELLENAR
+  </script>
+
+  <!-- Tu JS principal (versión con Supabase que te pasé) -->
+  <script src="./script.js?v=3" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -30,38 +36,16 @@
       <div class="logo" aria-hidden="true"></div>
       <h1>Registro de Créditos Académicos</h1>
     </div>
-    <!-- Botón oculto para abrir admin -->
-    <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador">●</button>
+
+    <div style="display:flex; gap:8px; align-items:center">
+      <!-- Botón oculto para abrir admin -->
+      <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador">●</button>
+      <!-- Botón de sesión -->
+      <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
+    </div>
   </header>
 
   <main class="container">
-
-    <!-- En la topbar, junto al botón admin -->
-<button class="btn" id="authBtn" type="button">Iniciar sesión</button>
-
-<!-- Modal simple de auth -->
-<div class="modal" id="authModal" aria-hidden="true" role="dialog">
-  <div class="modal-content" role="document">
-    <header class="modal-header">
-      <h3>Acceder</h3>
-      <button class="iconbtn" id="closeAuth" type="button">✕</button>
-    </header>
-    <div style="padding:12px">
-      <label>Email
-        <input type="email" id="authEmail" placeholder="correo@dominio.com" />
-      </label>
-      <label>Contraseña
-        <input type="password" id="authPass" placeholder="********" />
-      </label>
-      <div class="actions" style="margin-top:10px">
-        <button class="btn primary" id="doLogin" type="button">Entrar</button>
-        <button class="btn" id="doSignup" type="button">Crear cuenta</button>
-        <span class="muted" id="authState">—</span>
-      </div>
-    </div>
-  </div>
-</div>
-
     <!-- FORMULARIO -->
     <section class="card" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
@@ -211,11 +195,34 @@
     </div>
   </div>
 
+  <!-- MODAL DE AUTENTICACIÓN -->
+  <div class="modal" id="authModal" aria-hidden="true" role="dialog">
+    <div class="modal-content" role="document">
+      <header class="modal-header">
+        <h3>Acceder</h3>
+        <button class="iconbtn" id="closeAuth" type="button">✕</button>
+      </header>
+      <div style="padding:12px">
+        <label>Email
+          <input type="email" id="authEmail" placeholder="correo@dominio.com" />
+        </label>
+        <label>Contraseña
+          <input type="password" id="authPass" placeholder="********" />
+        </label>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn primary" id="doLogin" type="button">Entrar</button>
+          <button class="btn" id="doSignup" type="button">Crear cuenta</button>
+          <span class="muted" id="authState">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <footer class="foot">
-    <small>© 2025 — MVP local. Para producción agregar backend y base de datos.</small>
+    <small>© 2025 — MVP con Supabase (Auth, DB, Storage). Para producción: roles admin y políticas ampliadas.</small>
   </footer>
 </body>
 </html>
