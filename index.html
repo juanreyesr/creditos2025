@@ -35,6 +35,33 @@
   </header>
 
   <main class="container">
+
+    <!-- En la topbar, junto al botón admin -->
+<button class="btn" id="authBtn" type="button">Iniciar sesión</button>
+
+<!-- Modal simple de auth -->
+<div class="modal" id="authModal" aria-hidden="true" role="dialog">
+  <div class="modal-content" role="document">
+    <header class="modal-header">
+      <h3>Acceder</h3>
+      <button class="iconbtn" id="closeAuth" type="button">✕</button>
+    </header>
+    <div style="padding:12px">
+      <label>Email
+        <input type="email" id="authEmail" placeholder="correo@dominio.com" />
+      </label>
+      <label>Contraseña
+        <input type="password" id="authPass" placeholder="********" />
+      </label>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn primary" id="doLogin" type="button">Entrar</button>
+        <button class="btn" id="doSignup" type="button">Crear cuenta</button>
+        <span class="muted" id="authState">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
     <!-- FORMULARIO -->
     <section class="card" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
