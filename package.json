@@ -1,0 +1,24 @@
+{
+  "name": "sistema-creditos-vercel",
+  "version": "1.0.0",
+  "description": "Sistema de Créditos Académicos - Colegio de Psicólogos de Guatemala",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js",
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "keywords": [
+    "academic-credits",
+    "guatemala",
+    "psychology",
+    "vercel"
+  ],
+  "author": "Colegio de Psicólogos de Guatemala",
+  "license": "MIT"
+}
