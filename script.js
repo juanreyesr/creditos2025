@@ -374,6 +374,63 @@ async function generarConstanciaPDF(rec){
 }
 
 function getBase64Image(img){ const canvas=document.createElement('canvas'); canvas.width=img.naturalWidth; canvas.height=img.naturalHeight; const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0); return canvas.toDataURL('image/png'); }
+function getBase64FromCanvas(canvas) {
+  try {
+    return canvas.toDataURL('image/png');
+  } catch (e) {
+    console.error('No se pudo leer canvas como dataURL:', e);
+    return null;
+  }
+}
+
+async function getQrDataUrl(text, size=96) {
+  // Si no está la lib, salimos sin error (PDF seguirá sin QR)
+  if (typeof QRCode === 'undefined') {
+    console.warn('QRCode.js no está disponible. Revisa el <script> qrcode.min.js en index.html');
+    return null;
+  }
+  return new Promise((resolve) => {
+    const tmp = document.createElement('div');
+    // Generar QR
+    new QRCode(tmp, { text, width: size, height: size, correctLevel: QRCode.CorrectLevel.M });
+
+    // Puede renderizarse como <img> o <canvas>
+    const img = tmp.querySelector('img');
+    const canvas = tmp.querySelector('canvas');
+
+    // Si generó canvas
+    if (canvas) {
+      const url = getBase64FromCanvas(canvas);
+      return resolve(url);
+    }
+
+    // Si generó img
+    if (img) {
+      if (img.complete) {
+        try { return resolve(getBase64Image(img)); } catch { return resolve(null); }
+      } else {
+        img.onload = () => {
+          try { resolve(getBase64Image(img)); } catch { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+      }
+      return;
+    }
+
+    // Si no hay ni canvas ni img, devolvemos null sin romper
+    resolve(null);
+  });
+}
+
+// Mantén este helper si ya lo tenías
+function getBase64Image(img){
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth || img.width;
+  canvas.height = img.naturalHeight || img.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img,0,0);
+  return canvas.toDataURL('image/png');
+}
 
 /* =======================================================
    Carga inicial
