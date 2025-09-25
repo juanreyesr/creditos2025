@@ -391,7 +391,7 @@ async function generarConstanciaPDF(rec){
 
   // Pie
   doc.setFontSize(10); doc.setTextColor(120);
-  doc.text('Este documento es una constancia generada automáticamente a partir de los datos ingresados por el usuario.', pad, 790);
+  doc.text('Este documento es una constancia generada automáticamente a partir de los datos ingresados por el usuario, cualquier dato falso invalida la constancia generada.', pad, 790);
   doc.text(`Hash: ${rec.hash}`, pad, 805);
 
   doc.save(`Constancia_${rec.correlativo}.pdf`);
