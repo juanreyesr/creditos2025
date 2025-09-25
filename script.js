@@ -422,16 +422,6 @@ async function getQrDataUrl(text, size=96) {
   });
 }
 
-// Mantén este helper si ya lo tenías
-function getBase64Image(img){
-  const canvas = document.createElement('canvas');
-  canvas.width = img.naturalWidth || img.width;
-  canvas.height = img.naturalHeight || img.height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img,0,0);
-  return canvas.toDataURL('image/png');
-}
-
 /* =======================================================
    Carga inicial
 ======================================================= */
