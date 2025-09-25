@@ -296,23 +296,33 @@ clearDataBtn.addEventListener('click', ()=>{ showToast('Con Supabase, “borrar 
    PDF + QR (igual que tu versión, con link verificación)
 ======================================================= */
 async function generarConstanciaPDF(rec){
+  // Validaciones de librerías
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    console.error('jsPDF no está disponible. Revisa el <script> de jsPDF en index.html.');
+    showToast('jsPDF no cargó. Revisa conexión/librerías.', 'error');
+    throw new Error('jsPDF missing');
+  }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({unit:'pt',format:'a4'});
+
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
+  // Encabezado
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
   doc.setFontSize(11); doc.setFont('helvetica','normal');
   doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
 
+  // Correlativo
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
   doc.text(`No. ${rec.correlativo}`, pad, 112);
 
+  // Datos
   doc.setFont('helvetica','normal'); doc.setFontSize(12);
   const lines = [
     `Nombre: ${rec.nombre}`,
     `Teléfono: ${rec.telefono}`,
-    `Colegiado No.: ${rec.colegiado_numero || '—'} (Activo: ${rec.colegiado_activo})`,
+    `Colegiado No.: ${(rec.colegiado_numero ?? rec.colegiadoNumero) || '—'} (Activo: ${(rec.colegiado_activo ?? rec.colegiadoActivo) || '—'})`,
     `Actividad: ${rec.actividad}`,
     `Institución: ${rec.institucion}`,
     `Tipo: ${rec.tipo}`,
@@ -320,8 +330,31 @@ async function generarConstanciaPDF(rec){
     `Horas: ${rec.horas}`,
     `Créditos (16h = 1): ${rec.creditos}`,
   ];
-  let y = 140; const lineH = 18; for(const ln of lines){ doc.text(ln, pad, y); y+=lineH; }
-  if(rec.observaciones){ doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y+=lineH; }
+  let y = 140; const lineH = 18;
+  for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
+  if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
+
+  // QR (intenta, pero no rompe si falla)
+  try {
+    const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
+    const qrDataUrl = await getQrDataUrl(verifyUrl, 96);
+    if (qrDataUrl) {
+      doc.addImage(qrDataUrl, 'PNG', 450, 64, 96, 96);
+      doc.setFontSize(10); doc.setTextColor(120);
+      doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790);
+      doc.text(verifyUrl, pad, 805, { maxWidth: 500 });
+    }
+  } catch (err) {
+    console.warn('QR no pudo generarse, se continúa sin QR:', err);
+  }
+
+  // Pie
+  doc.setFontSize(10); doc.setTextColor(120);
+  if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
+
+  doc.save(`Constancia_${rec.correlativo}.pdf`);
+}
+
 
   // URL de verificación (página local /verificar)
   const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
