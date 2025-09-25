@@ -16,20 +16,25 @@
 </main>
 
 <!-- Panel administrador (modal) -->
+<!-- Panel administrador (modal) -->
 <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
-<div class="modal-content" role="document">
-<header class="modal-header">
-<h3 id="adminTitle">Panel de Administrador</h3>
-<button class="iconbtn" id="closeAdmin">✕</button>
-</header>
+  <div class="modal-content" role="document">
+    <header class="modal-header">
+      <h3 id="adminTitle">Panel de Administrador</h3>
+      <!-- AÑADE type="button" -->
+      <button class="iconbtn" id="closeAdmin" type="button">✕</button>
+    </header>
 
-<div id="adminAuth">
-<p>Ingrese contraseña de administrador:</p>
-<input type="password" id="adminPass" placeholder="••••••" />
-<div class="actions">
-<button class="btn primary" id="adminLogin">Ingresar</button>
-</div>
-</div>
+    <div id="adminAuth">
+      <p>Ingrese contraseña de administrador:</p>
+      <input type="password" id="adminPass" placeholder="••••••" />
+      <div class="actions">
+        <!-- AÑADE type="button" -->
+        <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+      </div>
+    </div>
+    ...
+
 
 <div id="adminBody" hidden>
 <div class="admin-actions">
