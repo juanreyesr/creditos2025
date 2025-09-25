@@ -1,7 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "api/**.ts": { "runtime": "nodejs20.x" },
-    "api/**.js": { "runtime": "nodejs20.x" }
-  }
+    "api/index.js": { "runtime": "nodejs20.x" }
+  },
+  "routes": [
+    { "src": "/(.*)", "dest": "/api/index.js" }
+  ]
 }
