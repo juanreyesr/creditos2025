@@ -22,10 +22,3 @@
   "author": "Colegio de Psicólogos de Guatemala",
   "license": "MIT"
 }
-{
-  "engines": { "node": "20.x" },
-  "scripts": {
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build || vite build || echo \"no-op\"",
-    "start": "next start || node server.js || vite preview"
-  }
-}
