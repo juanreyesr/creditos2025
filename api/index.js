@@ -1,18 +1,26 @@
-// api/index.js
 const express = require('express');
 const app = express();
 
 app.use(express.json());
 
-// Rutas de tu app (ejemplos)
+// Rutas de negocio (ejemplos)
 app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'creditos', timestamp: Date.now() });
+res.json({ ok: true, service: 'creditos', runtime: 'vercel-serverless', ts: Date.now() });
 });
 
-// Ejemplo de endpoint principal (sirve tu SPA/API)
+app.get('/psicologos', (req, res) => {
+const { especialidad, minPrecio, maxPrecio, lat, lng, radioKm } = req.query;
+res.json({ filtros: { especialidad, minPrecio, maxPrecio, lat, lng, radioKm }, resultados: [] });
+});
+
+app.get('/instituciones', (req, res) => {
+res.json({ instituciones: [] });
+});
+
+// Catch-all (dejar al final)
 app.get('*', (req, res) => {
-  res.json({ message: 'Directorio de psicólogos – API/Router activo', path: req.path });
+res.json({ message: 'Directorio de psicólogos – API/Router activo', path: req.path });
 });
 
-// 👉 Exporta el handler para Vercel (SIN app.listen)
+// Exportar handler para Vercel (SIN app.listen)
 module.exports = (req, res) => app(req, res);
