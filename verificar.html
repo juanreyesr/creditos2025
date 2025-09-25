@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Verificación de Constancia — CPG</title>
+
+  <!-- Usa el mismo CSS del sitio -->
+  <link rel="stylesheet" href="./styles.css?v=2" />
+  <style>
+    .center { display:flex; align-items:center; justify-content:center; }
+  </style>
+
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+
+  <!-- Config (usa las mismas credenciales que index.html) -->
+  <script>
+    // Si ya definiste window.SB_URL / window.SB_KEY en index.html, no hace falta repetir.
+    // Pero por si esta página se abre de forma directa, puedes dejarlas aquí también:
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";   // <-- opcional: pega tu Project URL
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";   // <-- opcional: pega tu anon key
+  </script>
+
+  <!-- Lógica de verificación -->
+  <script src="./verificar.js?v=1" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <h1>Verificación de Constancia</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <p class="help">Escaneaste un QR de una constancia. Validaremos contra el registro en la base de datos.</p>
+      <div id="result" class="table-wrap" style="padding:12px">Cargando…</div>
+
+      <div class="actions" style="margin-top:12px">
+        <a class="btn" href="./index.html">Volver al registro</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <small>© 2025 — Colegio de Psicólogos de Guatemala. Verificación pública de constancias.</small>
+  </footer>
+</body>
+</html>
