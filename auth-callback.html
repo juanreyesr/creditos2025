@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cuenta verificada</title>
+  <link rel="stylesheet" href="./styles.css?v=2">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script>
+    // Intento opcional de refrescar sesión y volver a la app
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      try{
+        const url = window.SB_URL, key = window.SB_KEY;
+        if (url && key && window.supabase){
+          const sb = window.supabase.createClient(url, key);
+          await sb.auth.getSession();
+        }
+      }catch(e){}
+      setTimeout(()=> { location.href = './index.html'; }, 2000);
+    });
+  </script>
+</head>
+<body>
+  <main class="container" style="max-width:720px">
+    <section class="card">
+      <h2>¡Listo! Tu correo fue verificado</h2>
+      <p>Puedes cerrar esta ventana. En unos segundos te llevaremos al registro.</p>
+      <p><a class="btn" href="./index.html">Ir ahora</a></p>
+    </section>
+  </main>
+</body>
+</html>
