@@ -1,13 +1,11 @@
-// Helper para leer parámetros ?c=...&h=...
-function getParam(key) {
-  return new URLSearchParams(location.search).get(key);
+function getParams() {
+  const u = new URLSearchParams(location.search);
+  return { c: u.get('c') || '', h: u.get('h') || '' };
 }
-
 function renderMsg(html) {
   const box = document.getElementById('result');
   box.innerHTML = `<div style="padding:10px">${html}</div>`;
 }
-
 function renderTable(row) {
   const box = document.getElementById('result');
   box.innerHTML = `
@@ -24,40 +22,50 @@ function renderTable(row) {
     <p class="muted" style="padding:8px 10px">Constancia válida encontrada en la base de datos.</p>
   `;
 }
-
-(async function main() {
-  const c = getParam('c');
-  const h = getParam('h');
-
-  if (!c || !h) {
-    renderMsg('<strong>Parámetros inválidos.</strong> Debes acceder con un enlace que incluya <code>?c=</code> y <code>&h=</code>.');
-    return;
-  }
-
-  // Crear cliente de Supabase (usa variables globales definidas en index.html o en este archivo)
-  const url = window.NEXT_PUBLIC_SUPABASE_URL || window.SB_URL || 'https://ilyospunwucdojrnfgti.supabase.co';
-  const key = window.NEXT_PUBLIC_SUPABASE_ANON_KEY || window.SB_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4';
-  if (!url || !key) {
-    renderMsg('No se encontraron credenciales de Supabase. Define <code>window.SB_URL</code> y <code>window.SB_KEY</code>.');
-    return;
-  }
-  const supabase = window.supabase.createClient(url, key);
-
-  // Llamar a la función RPC pública para verificar
+function getSupabase() {
   try {
-    const { data, error } = await supabase.rpc('verify_constancia', { c, h });
-    if (error) {
-      console.error(error);
-      renderMsg('Ocurrió un error al verificar la constancia.');
-      return;
-    }
-    if (!data || data.length === 0) {
-      renderMsg('<strong>No se encontró una constancia válida</strong> para los parámetros proporcionados.');
-      return;
-    }
+    if (!window.supabase || !window.SB_URL || !window.SB_KEY) return null;
+    if (!getSupabase._c) getSupabase._c = window.supabase.createClient(window.SB_URL, window.SB_KEY);
+    return getSupabase._c;
+  } catch { return null; }
+}
+
+async function verify(c, h) {
+  const box = document.getElementById('result');
+  const sb = getSupabase();
+  if (!sb) { renderMsg('No hay credenciales de Supabase.'); return; }
+  if (!c || !h) { renderMsg('Debes ingresar correlativo y hash.'); return; }
+
+  box.textContent = 'Verificando…';
+  try {
+    const { data, error } = await sb.rpc('verify_constancia', { c, h });
+    if (error) { console.error(error); renderMsg('Ocurrió un error al verificar la constancia.'); return; }
+    if (!data || data.length === 0) { renderMsg('<strong>No se encontró una constancia válida</strong> para esos datos.'); return; }
     renderTable(data[0]);
   } catch (e) {
     console.error(e);
     renderMsg('Error inesperado durante la verificación.');
   }
-})();
+}
+
+document.getElementById('verifyForm')?.addEventListener('submit', (e)=>{
+  e.preventDefault();
+  const c = document.getElementById('vc').value.trim();
+  const h = document.getElementById('vh').value.trim();
+  verify(c, h);
+});
+
+document.getElementById('useQuery')?.addEventListener('click', ()=>{
+  const { c, h } = getParams();
+  document.getElementById('vc').value = c || '';
+  document.getElementById('vh').value = h || '';
+  if (c && h) verify(c, h);
+});
+
+// Autocompletar si viene desde QR
+window.addEventListener('DOMContentLoaded', ()=>{
+  const { c, h } = getParams();
+  if (c) document.getElementById('vc').value = c;
+  if (h) document.getElementById('vh').value = h;
+  if (c && h) verify(c, h);
+});
