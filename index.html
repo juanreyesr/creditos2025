@@ -21,14 +21,14 @@
 
   <!-- SUPABASE CONFIG (usa las credenciales de tu proyecto) -->
   <script>
-    // Si ya configuraste variables en Vercel, puedes dejar esto vacío y tu script.js las leerá.
-    // Para sitios 100% estáticos, define aquí:
+    // Si usas variables de entorno en Vercel, puedes dejar esto vacío.
+    // Para sitio estático, define aquí:
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
-  <!-- Tu JS principal (versión con Supabase) -->
-  <script src="./script.js?v=3" defer></script>
+  <!-- Tu JS principal -->
+  <script src="./script.js?v=4" defer></script>
 </head>
 <body>
   <noscript>
@@ -43,12 +43,11 @@
       <h1>Registro de Créditos Académicos</h1>
     </div>
 
-    <div style="display:flex; gap:8px; align-items:center">
-      <!-- Botón oculto para abrir admin -->
+    <nav class="top-actions" style="display:flex; gap:8px; align-items:center">
+      <a class="btn" href="./verificar.html">Verificar constancia</a>
       <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
-      <!-- Botón de sesión -->
       <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
-    </div>
+    </nav>
   </header>
 
   <main class="container">
@@ -79,8 +78,8 @@
             />
           </label>
 
-          <label>Número de colegiado (opcional)
-            <input type="text" name="colegiadoNumero" id="colegiadoNumero" maxlength="20" autocomplete="off" />
+          <label>Número de colegiado*
+            <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" />
           </label>
 
           <label>¿Colegiado activo?*
