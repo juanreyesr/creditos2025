@@ -1,43 +1,34 @@
 /* =======================================================
-   Supabase init
+   Supabase lazy init
 ======================================================= */
-const SB_URL =
-  window?.ENV?.SUPABASE_URL ||
-  window.NEXT_PUBLIC_SUPABASE_URL ||
-  window.__env?.SUPABASE_URL ||
-  (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_URL : null) ||
-  window.localStorage.getItem('SB_URL') ||
-  (typeof window !== 'undefined' ? window?.SB_URL : null) ||
-  (typeof globalThis !== 'undefined' ? globalThis?.SB_URL : null) ||
-  (typeof document !== 'undefined' ? document?.SB_URL : null);
-
-const SB_KEY =
-  window?.ENV?.SUPABASE_ANON ||
-  window.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  window.__env?.SUPABASE_ANON_KEY ||
-  (typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY : null) ||
-  window.localStorage.getItem('SB_KEY') ||
-  (typeof window !== 'undefined' ? window?.SB_KEY : null);
-
-if (!window.supabase) {
-  console.error('Supabase SDK no cargó. Revisa el <script> de @supabase/supabase-js en index.html');
+function getSupabaseClient() {
+  try {
+    const hasSDK = !!window.supabase && typeof window.supabase.createClient === 'function';
+    const url = (window?.ENV?.SUPABASE_URL) ||
+                window.NEXT_PUBLIC_SUPABASE_URL ||
+                window.__env?.SUPABASE_URL ||
+                window.SB_URL ||
+                (typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SUPABASE_URL : null);
+    const key = (window?.ENV?.SUPABASE_ANON) ||
+                window.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+                window.__env?.SUPABASE_ANON_KEY ||
+                window.SB_KEY ||
+                (typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY : null);
+    if (!hasSDK || !url || !key) return null;
+    if (!getSupabaseClient._client) {
+      getSupabaseClient._client = window.supabase.createClient(url, key);
+    }
+    return getSupabaseClient._client;
+  } catch (e) {
+    console.error('Error creando Supabase client:', e);
+    return null;
+  }
 }
-
-const supabase = window.supabase?.createClient(
-  SB_URL ||
-    (typeof NEXT_PUBLIC_SUPABASE_URL !== 'undefined' ? NEXT_PUBLIC_SUPABASE_URL : null) ||
-    (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SUPABASE_URL : null) ||
-    (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_URL : null),
-  SB_KEY ||
-    (typeof NEXT_PUBLIC_SUPABASE_ANON_KEY !== 'undefined' ? NEXT_PUBLIC_SUPABASE_ANON_KEY : null) ||
-    (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_SUPABASE_ANON_KEY : null) ||
-    (typeof process !== 'undefined' ? process.env?.VITE_SUPABASE_ANON_KEY : null)
-);
 
 /* =======================================================
    Config/Utils
 ======================================================= */
-const ADMIN_PASSWORD = "CAEDUC2025";  // solo para panel local de export
+const ADMIN_PASSWORD = "CAEDUC2025";
 const ADMIN_SESSION_MIN = 10;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
@@ -72,7 +63,6 @@ const creditosEl = document.getElementById('creditos');
 const tablaBody = document.querySelector('#tablaRegistros tbody');
 const obsEl = document.getElementById('observaciones');
 const fechaEl = document.getElementById('fecha');
-const telEl = document.getElementById('telefono');
 
 const upZone = document.getElementById('uploader');
 const fileInput = document.getElementById('archivo');
@@ -106,36 +96,34 @@ const authState = document.getElementById('authState');
 /* =======================================================
    Inicialización UI + Auth
 ======================================================= */
-(function(){ const now=new Date(); if(fechaEl) fechaEl.max = now.toISOString().slice(0,10); })();
-try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
+(function(){
+  const now=new Date();
+  if(fechaEl) fechaEl.max = now.toISOString().slice(0,10);
+  try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
+})();
 
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-// Uploader: botón examinar
-browseBtn?.addEventListener('click', ()=> fileInput?.click());
-
-// Uploader: click en toda la zona (sin duplicar con el botón interno)
-upZone?.addEventListener('click', (e)=>{
-  if (!fileInput) return;
-  if (e.target && e.target.id === 'browseBtn') return; // ya se maneja arriba
+/* ---------- Uploader (a prueba de balas) ---------- */
+browseBtn?.addEventListener('click', ()=>{
+  if(!fileInput){ console.warn('fileInput no encontrado'); return; }
   fileInput.click();
 });
-
-// Uploader: drag & drop
+upZone?.addEventListener('click', (e)=>{
+  if(!fileInput){ console.warn('fileInput no encontrado'); return; }
+  if (e.target && e.target.id === 'browseBtn') return;
+  fileInput.click();
+});
 ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev, e=>{
-  e.preventDefault(); if(upZone) upZone.style.borderColor = '#60a5fa';
+  e.preventDefault(); if(upZone) upZone.style.borderColor='#60a5fa';
 }));
 ['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev, e=>{
-  e.preventDefault(); if(upZone) upZone.style.borderColor = '#334155';
+  e.preventDefault(); if(upZone) upZone.style.borderColor='#334155';
   if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null); }
 }));
-
-// Uploader: input change
 fileInput?.addEventListener('change', (e)=> handleFile(e.target.files?.[0]||null));
-
-// Uploader: accesibilidad
 upZone?.addEventListener('keydown', (e)=>{
   if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput?.click(); }
 });
@@ -143,8 +131,8 @@ upZone?.addEventListener('keydown', (e)=>{
 function handleFile(file){
   if(!preview) return;
   preview.innerHTML=''; fileRef=null; if(!file) return;
-  if(!ALLOWED_MIME.includes(file.type)) return showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error');
-  const mb=file.size/1024/1024; if(mb>MAX_FILE_MB) return showToast('Archivo supera 10 MB.', 'error');
+  if(!ALLOWED_MIME.includes(file.type)) { showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error'); return; }
+  const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
   fileRef=file;
   if(file.type==='application/pdf'){
     const url=URL.createObjectURL(file);
@@ -160,38 +148,38 @@ function handleFile(file){
 
 /* ---------- Auth UI ---------- */
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
-function closeModal(m){ m?.setAttribute('aria-hidden','true'); authState && (authState.textContent='—'); }
+function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
 authBtn?.addEventListener('click', ()=>{
-  if (!window.supabase || !supabase) {
-    showToast('No se pudo inicializar autenticación (Supabase).', 'error');
-    return;
-  }
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
   openModal(authModal);
 });
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
 authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
 doSignup?.addEventListener('click', async ()=>{
-  if (!window.supabase || !supabase) return showToast('Supabase no disponible.', 'error');
-  authState && (authState.textContent = 'Creando cuenta...');
-  const { error } = await supabase.auth.signUp({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
-  if(error) { authState && (authState.textContent = 'Error: '+error.message); return; }
-  authState && (authState.textContent = 'Cuenta creada. Sesión iniciada.');
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
+  if(authState) authState.textContent = 'Creando cuenta...';
+  const { error } = await sb.auth.signUp({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+  if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
+  if(authState) authState.textContent='Cuenta creada. Sesión iniciada.';
   closeModal(authModal); await loadAndRender();
 });
 
 doLogin?.addEventListener('click', async ()=>{
-  if (!window.supabase || !supabase) return showToast('Supabase no disponible.', 'error');
-  authState && (authState.textContent = 'Ingresando...');
-  const { error } = await supabase.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
-  if(error) { authState && (authState.textContent = 'Error: '+error.message); return; }
-  authState && (authState.textContent = 'OK');
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
+  if(authState) authState.textContent = 'Ingresando...';
+  const { error } = await sb.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+  if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
+  if(authState) authState.textContent='OK';
   closeModal(authModal); await loadAndRender();
 });
 
-// Cambios de sesión
-supabase?.auth.onAuthStateChange(async (_evt, session)=>{
+const sbForSession = getSupabaseClient();
+sbForSession?.auth.onAuthStateChange(async (_evt, session)=>{
   if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
 });
 
@@ -199,13 +187,11 @@ supabase?.auth.onAuthStateChange(async (_evt, session)=>{
    Datos (Supabase)
 ======================================================= */
 async function loadAndRender(){
-  if(!supabase) return;
-  const { data: session } = await supabase.auth.getSession();
+  const sb = getSupabaseClient();
+  if(!sb) return;
+  const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  const { data, error } = await supabase
-    .from('registros')
-    .select('*')
-    .order('created_at', { ascending:false });
+  const { data, error } = await sb.from('registros').select('*').order('created_at', { ascending:false });
   if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
   renderTabla(data);
 }
@@ -230,7 +216,8 @@ tablaBody?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button[data-action="pdf"]');
   if(!btn) return;
   const id = btn.getAttribute('data-id');
-  const { data: rows, error } = await supabase.from('registros').select('*').eq('id', id).limit(1);
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
   if(error || !rows?.length) return showToast('Registro no disponible','error');
   await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
 });
@@ -241,15 +228,11 @@ tablaBody?.addEventListener('click', async (e)=>{
 form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
 
-  if (!window.supabase || !supabase) {
-    showToast('Supabase no está disponible. Verifica scripts/credenciales.', 'error');
-    return;
-  }
-  const { data: s, error: sesErr } = await supabase.auth.getSession();
-  if(sesErr || !s?.session){
-    showToast('Inicia sesión para registrar.', 'error');
-    return;
-  }
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('Supabase no está disponible. Verifica scripts/credenciales.', 'error'); return; }
+
+  const { data: s, error: sesErr } = await sb.auth.getSession();
+  if(sesErr || !s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
   const user = s.session.user;
 
   // Validaciones
@@ -276,25 +259,25 @@ form?.addEventListener('submit', async (e)=>{
     const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
   }
 
-  // Correlativo atómico (servidor)
-  const { data: corrData, error: corrErr } = await supabase.rpc('next_correlativo');
+  // Correlativo atómico
+  const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
   if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
   const correlativo = corrData;
 
   const creditos = calcCreditos(horas);
   const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
-  // Subir archivo a Storage (opcional)
+  // Subir archivo (opcional)
   let archivo_url = null, archivo_mime = null;
   if(fileRef){
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
     const path = `${user.id}/${correlativo}-${safeName}`;
-    const { error: upErr } = await supabase.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+    const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
     if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
     archivo_url = path; archivo_mime = fileRef.type;
   }
 
-  // Insertar registro
+  // Insert
   const payload = {
     usuario_id: user.id,
     correlativo,
@@ -305,14 +288,17 @@ form?.addEventListener('submit', async (e)=>{
     hash
   };
 
-  const { data: inserted, error: insErr } = await supabase.from('registros').insert(payload).select().single();
+  const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
   if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro','error'); return; }
 
   // PDF
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
+
+  // Reset controlado
   form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
   fileRef = null;
+
   loadAndRender();
 });
 
@@ -336,7 +322,8 @@ adminLogin?.addEventListener('click', async (ev)=>{
 });
 
 async function renderAdmin(){
-  const { data: rows, error } = await supabase.from('registros').select('*').order('created_at', { ascending:false });
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const { data: rows, error } = await sb.from('registros').select('*').order('created_at', { ascending:false });
   if(error){ if(exportStatus) exportStatus.textContent='Error al cargar'; return; }
   if(!adminTbody) return;
   adminTbody.innerHTML='';
@@ -365,7 +352,8 @@ setInterval(()=>{ if(!adminBody?.hidden && !adminSessionValid()){ showToast('Ses
 
 exportCSVBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
-  const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const { data: rows } = await sb.from('registros').select('*').order('created_at',{ascending:false});
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(
@@ -380,7 +368,8 @@ exportCSVBtn?.addEventListener('click', async ()=>{
 
 exportXLSXBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
-  const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const { data: rows } = await sb.from('registros').select('*').order('created_at',{ascending:false});
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -394,31 +383,24 @@ clearDataBtn?.addEventListener('click', ()=>{
 });
 
 /* =======================================================
-   PDF + QR (robusto; no falla si el QR no carga)
+   PDF + QR (robusto)
 ======================================================= */
 async function generarConstanciaPDF(rec){
-  // Validaciones de librerías
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    console.error('jsPDF no está disponible. Revisa el <script> de jsPDF en index.html.');
-    showToast('jsPDF no cargó. Revisa conexión/librerías.', 'error');
-    throw new Error('jsPDF missing');
+    console.error('jsPDF no está disponible.'); showToast('jsPDF no cargó.', 'error'); throw new Error('jsPDF missing');
   }
   const { jsPDF } = window.jspdf;
-
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
-  // Encabezado
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
   doc.setFontSize(11); doc.setFont('helvetica','normal');
   doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
 
-  // Correlativo
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
   doc.text(`No. ${rec.correlativo}`, pad, 112);
 
-  // Datos
   doc.setFont('helvetica','normal'); doc.setFontSize(12);
   const lines = [
     `Nombre: ${rec.nombre}`,
@@ -435,7 +417,6 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR (intenta, pero no rompe si falla)
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, 96);
@@ -449,14 +430,12 @@ async function generarConstanciaPDF(rec){
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
   }
 
-  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
   doc.save(`Constancia_${rec.correlativo}.pdf`);
 }
 
-// Helpers QR/Canvas
 function getBase64Image(img){
   const canvas=document.createElement('canvas');
   canvas.width=img.naturalWidth || img.width;
@@ -471,8 +450,7 @@ function getBase64FromCanvas(canvas){
 }
 async function getQrDataUrl(text, size=96){
   if (typeof QRCode === 'undefined') {
-    console.warn('QRCode.js no está disponible. Revisa el <script> qrcode.min.js en index.html');
-    return null;
+    console.warn('QRCode.js no está disponible.'); return null;
   }
   return new Promise((resolve)=>{
     const tmp = document.createElement('div');
@@ -480,16 +458,11 @@ async function getQrDataUrl(text, size=96){
     const img = tmp.querySelector('img');
     const canvas = tmp.querySelector('canvas');
 
-    if (canvas) {
-      return resolve(getBase64FromCanvas(canvas));
-    }
+    if (canvas) return resolve(getBase64FromCanvas(canvas));
     if (img) {
-      if (img.complete) {
-        try { return resolve(getBase64Image(img)); } catch { return resolve(null); }
-      } else {
-        img.onload = () => { try { resolve(getBase64Image(img)); } catch { resolve(null); } };
-        img.onerror = () => resolve(null);
-      }
+      if (img.complete) { try { return resolve(getBase64Image(img)); } catch { return resolve(null); } }
+      img.onload = () => { try { resolve(getBase64Image(img)); } catch { resolve(null); } };
+      img.onerror = () => resolve(null);
       return;
     }
     resolve(null);
