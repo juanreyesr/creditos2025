@@ -47,6 +47,7 @@ function sanitize(str){
 }
 function showToast(msg, type="info"){
   const el = document.getElementById('toast');
+  if(!el){ alert(msg); return; }
   el.textContent = msg;
   el.style.borderColor = type==="error"?"#f43f5e": type==="warn"?"#f59e0b":"#243055";
   el.classList.add('show');
@@ -105,16 +106,42 @@ const authState = document.getElementById('authState');
 /* =======================================================
    Inicialización UI + Auth
 ======================================================= */
-(function(){ const now=new Date(); fechaEl.max = now.toISOString().slice(0,10); })();
+(function(){ const now=new Date(); if(fechaEl) fechaEl.max = now.toISOString().slice(0,10); })();
 try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
 
-horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
-browseBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', (e)=> handleFile(e.target.files?.[0]||null));
-['dragenter','dragover'].forEach(ev=> upZone.addEventListener(ev, e=>{e.preventDefault(); upZone.style.borderColor = '#60a5fa';}));
-['dragleave','drop'].forEach(ev=> upZone.addEventListener(ev, e=>{e.preventDefault(); upZone.style.borderColor = '#334155'; if(ev==='drop'){handleFile(e.dataTransfer.files?.[0]||null);} }));
+if (horasEl && creditosEl) {
+  horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
+}
+
+// Uploader: botón examinar
+browseBtn?.addEventListener('click', ()=> fileInput?.click());
+
+// Uploader: click en toda la zona (sin duplicar con el botón interno)
+upZone?.addEventListener('click', (e)=>{
+  if (!fileInput) return;
+  if (e.target && e.target.id === 'browseBtn') return; // ya se maneja arriba
+  fileInput.click();
+});
+
+// Uploader: drag & drop
+['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev, e=>{
+  e.preventDefault(); if(upZone) upZone.style.borderColor = '#60a5fa';
+}));
+['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev, e=>{
+  e.preventDefault(); if(upZone) upZone.style.borderColor = '#334155';
+  if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null); }
+}));
+
+// Uploader: input change
+fileInput?.addEventListener('change', (e)=> handleFile(e.target.files?.[0]||null));
+
+// Uploader: accesibilidad
+upZone?.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput?.click(); }
+});
 
 function handleFile(file){
+  if(!preview) return;
   preview.innerHTML=''; fileRef=null; if(!file) return;
   if(!ALLOWED_MIME.includes(file.type)) return showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error');
   const mb=file.size/1024/1024; if(mb>MAX_FILE_MB) return showToast('Archivo supera 10 MB.', 'error');
@@ -132,39 +159,49 @@ function handleFile(file){
 }
 
 /* ---------- Auth UI ---------- */
-function openModal(m){ m.setAttribute('aria-hidden','false'); }
-function closeModal(m){ m.setAttribute('aria-hidden','true'); }
-authBtn?.addEventListener('click', ()=> openModal(authModal));
+function openModal(m){ m?.setAttribute('aria-hidden','false'); }
+function closeModal(m){ m?.setAttribute('aria-hidden','true'); authState && (authState.textContent='—'); }
+
+authBtn?.addEventListener('click', ()=>{
+  if (!window.supabase || !supabase) {
+    showToast('No se pudo inicializar autenticación (Supabase).', 'error');
+    return;
+  }
+  openModal(authModal);
+});
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
-authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin.click(); });
+authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
 doSignup?.addEventListener('click', async ()=>{
-  authState.textContent = 'Creando cuenta...';
-  const { error } = await supabase.auth.signUp({ email: authEmail.value.trim(), password: authPass.value });
-  if(error) return authState.textContent = 'Error: '+error.message;
-  authState.textContent = 'Cuenta creada. Sesión iniciada.';
+  if (!window.supabase || !supabase) return showToast('Supabase no disponible.', 'error');
+  authState && (authState.textContent = 'Creando cuenta...');
+  const { error } = await supabase.auth.signUp({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+  if(error) { authState && (authState.textContent = 'Error: '+error.message); return; }
+  authState && (authState.textContent = 'Cuenta creada. Sesión iniciada.');
   closeModal(authModal); await loadAndRender();
 });
 
 doLogin?.addEventListener('click', async ()=>{
-  authState.textContent = 'Ingresando...';
-  const { error } = await supabase.auth.signInWithPassword({ email: authEmail.value.trim(), password: authPass.value });
-  if(error) return authState.textContent = 'Error: '+error.message;
-  authState.textContent = 'OK';
+  if (!window.supabase || !supabase) return showToast('Supabase no disponible.', 'error');
+  authState && (authState.textContent = 'Ingresando...');
+  const { error } = await supabase.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+  if(error) { authState && (authState.textContent = 'Error: '+error.message); return; }
+  authState && (authState.textContent = 'OK');
   closeModal(authModal); await loadAndRender();
 });
 
-// Mostrar estado sesión en botón
+// Cambios de sesión
 supabase?.auth.onAuthStateChange(async (_evt, session)=>{
-  authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
+  if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
 });
 
 /* =======================================================
    Datos (Supabase)
 ======================================================= */
 async function loadAndRender(){
+  if(!supabase) return;
   const { data: session } = await supabase.auth.getSession();
-  if(!session?.session){ tablaBody.innerHTML=''; return; }
+  if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
   const { data, error } = await supabase
     .from('registros')
     .select('*')
@@ -174,6 +211,7 @@ async function loadAndRender(){
 }
 
 function renderTabla(rows){
+  if(!tablaBody) return;
   tablaBody.innerHTML='';
   for(const r of rows){
     const tr = document.createElement('tr');
@@ -183,12 +221,12 @@ function renderTabla(rows){
       <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,30))}${r.actividad.length>30?'…':''}</td>
       <td>${r.horas}</td>
       <td>${r.creditos}</td>
-      <td><button class="btn" data-id="${r.id}" data-action="pdf">PDF</button></td>`;
+      <td><button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button></td>`;
     tablaBody.appendChild(tr);
   }
 }
 
-tablaBody.addEventListener('click', async (e)=>{
+tablaBody?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button[data-action="pdf"]');
   if(!btn) return;
   const id = btn.getAttribute('data-id');
@@ -200,39 +238,47 @@ tablaBody.addEventListener('click', async (e)=>{
 /* =======================================================
    Submit (insert en Supabase + Storage)
 ======================================================= */
-form.addEventListener('submit', async (e)=>{
+form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
 
-  const { data: s } = await supabase.auth.getSession();
-  if(!s?.session){ showToast('Inicia sesión para registrar', 'error'); return; }
+  if (!window.supabase || !supabase) {
+    showToast('Supabase no está disponible. Verifica scripts/credenciales.', 'error');
+    return;
+  }
+  const { data: s, error: sesErr } = await supabase.auth.getSession();
+  if(sesErr || !s?.session){
+    showToast('Inicia sesión para registrar.', 'error');
+    return;
+  }
   const user = s.session.user;
 
   // Validaciones
-  const nombre = form.nombre.value.trim();
-  const telefono = form.telefono.value.trim();
-  const colegiadoNumero = form.colegiadoNumero.value.trim();
-  const colegiadoActivo = form.colegiadoActivo.value;
-  const actividad = form.actividad.value.trim();
-  const institucion = form.institucion.value.trim();
-  const tipo = form.tipo.value;
-  const fecha = form.fecha.value;
-  const horas = Number(form.horas.value);
-  const observaciones = obsEl.value.trim();
+  const nombre = (form.nombre?.value||'').trim();
+  const telefono = (form.telefono?.value||'').trim();
+  const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
+  const colegiadoActivo = form.colegiadoActivo?.value;
+  const actividad = (form.actividad?.value||'').trim();
+  const institucion = (form.institucion?.value||'').trim();
+  const tipo = form.tipo?.value;
+  const fecha = form.fecha?.value;
+  const horas = Number(form.horas?.value);
+  const observaciones = (obsEl?.value||'').trim();
 
-  if(!nombre || !telefono || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas)
-    return showToast('Complete los campos obligatorios (*)', 'error');
-  if(!phoneValidGT(telefono)) return showToast('Teléfono inválido (+502 ########)', 'error');
-  if(!withinFiveYears(fecha)) return showToast('Fecha inválida (no futura, ≤ 5 años)', 'error');
-  if(!(horas>=0.5 && horas<=200)) return showToast('Horas fuera de rango (0.5 a 200).', 'error');
-  if(observaciones.length>250) return showToast('Observaciones exceden 250 caracteres.', 'error');
+  if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
+    showToast('Complete todos los campos obligatorios (*), incluido el número de colegiado.', 'error'); return;
+  }
+  if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
+  if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
+  if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
+  if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
   if(fileRef){
-    if(!ALLOWED_MIME.includes(fileRef.type)) return showToast('Archivo no permitido.', 'error');
-    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB) return showToast('Archivo supera 10 MB.', 'error');
+    if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); return; }
+    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
   }
 
   // Correlativo atómico (servidor)
   const { data: corrData, error: corrErr } = await supabase.rpc('next_correlativo');
-  if(corrErr || !corrData) return showToast('No se pudo obtener correlativo', 'error');
+  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
   const correlativo = corrData;
 
   const creditos = calcCreditos(horas);
@@ -244,7 +290,7 @@ form.addEventListener('submit', async (e)=>{
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
     const path = `${user.id}/${correlativo}-${safeName}`;
     const { error: upErr } = await supabase.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
-    if(upErr) return showToast('No se pudo subir el archivo','error');
+    if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
     archivo_url = path; archivo_mime = fileRef.type;
   }
 
@@ -260,37 +306,39 @@ form.addEventListener('submit', async (e)=>{
   };
 
   const { data: inserted, error: insErr } = await supabase.from('registros').insert(payload).select().single();
-  if(insErr){ console.error(insErr); return showToast('No se pudo guardar el registro','error'); }
+  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro','error'); return; }
 
   // PDF
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
-  form.reset(); preview.innerHTML=''; creditosEl.value='';
+  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+  fileRef = null;
   loadAndRender();
 });
 
 /* =======================================================
    Panel Admin (local; exporta registros del usuario)
 ======================================================= */
-function openAdmin(){ adminModal.setAttribute('aria-hidden','false'); adminPass.value=''; }
-function closeAdminFn(){ adminModal.setAttribute('aria-hidden','true'); adminBody.hidden=true; adminAuth.hidden=false; adminPass.value=''; }
-openAdminBtn.addEventListener('click', openAdmin);
-closeAdmin.addEventListener('click', closeAdminFn);
+function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
+function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
+openAdminBtn?.addEventListener('click', openAdmin);
+closeAdmin?.addEventListener('click', closeAdminFn);
 window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
 
 let adminSessionEnd = 0;
 function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 function adminSessionValid(){ return Date.now() < adminSessionEnd; }
 
-adminLogin.addEventListener('click', async (ev)=>{
+adminLogin?.addEventListener('click', async (ev)=>{
   ev.preventDefault();
-  if((adminPass.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
-  adminAuth.hidden = true; adminBody.hidden = false; startAdminSession(); await renderAdmin(); showToast('Sesión admin iniciada','ok');
+  if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
+  if(adminAuth) adminAuth.hidden = true; if(adminBody) adminBody.hidden = false; startAdminSession(); await renderAdmin(); showToast('Sesión admin iniciada','ok');
 });
 
 async function renderAdmin(){
   const { data: rows, error } = await supabase.from('registros').select('*').order('created_at', { ascending:false });
-  if(error){ exportStatus.textContent='Error al cargar'; return; }
+  if(error){ if(exportStatus) exportStatus.textContent='Error al cargar'; return; }
+  if(!adminTbody) return;
   adminTbody.innerHTML='';
   for(const r of rows){
     const tr=document.createElement('tr');
@@ -313,10 +361,10 @@ async function renderAdmin(){
   }
 }
 
-setInterval(()=>{ if(!adminBody.hidden && !adminSessionValid()){ showToast('Sesión admin expirada','warn'); adminBody.hidden=true; adminAuth.hidden=false; adminPass.value=''; } }, 2000);
+setInterval(()=>{ if(!adminBody?.hidden && !adminSessionValid()){ showToast('Sesión admin expirada','warn'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; } }, 2000);
 
-exportCSVBtn.addEventListener('click', async ()=>{
-  if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+exportCSVBtn?.addEventListener('click', async ()=>{
+  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
@@ -327,21 +375,21 @@ exportCSVBtn.addEventListener('click', async ()=>{
   const url = URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`registros_cpg_${new Date().toISOString().slice(0,10)}.csv`; a.click();
   URL.revokeObjectURL(url);
-  exportStatus.textContent='CSV descargado';
+  if(exportStatus) exportStatus.textContent='CSV descargado';
 });
 
-exportXLSXBtn.addEventListener('click', async ()=>{
-  if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+exportXLSXBtn?.addEventListener('click', async ()=>{
+  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   const { data: rows } = await supabase.from('registros').select('*').order('created_at',{ascending:false});
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Registros');
   XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
-  exportStatus.textContent='Excel descargado';
+  if(exportStatus) exportStatus.textContent='Excel descargado';
 });
 
-clearDataBtn.addEventListener('click', ()=>{
+clearDataBtn?.addEventListener('click', ()=>{
   showToast('Con Supabase, “borrar todo” no está habilitado aquí. Usa la consola si lo necesitas.','warn');
 });
 
@@ -452,4 +500,3 @@ async function getQrDataUrl(text, size=96){
    Carga inicial
 ======================================================= */
 loadAndRender();
-upZone.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); }});
