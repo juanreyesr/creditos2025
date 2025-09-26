@@ -16,6 +16,7 @@ function getSupabaseClient() {
                 (typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY : null);
     if (!hasSDK || !url || !key) return null;
     if (!getSupabaseClient._client) {
+      console.log('[SB] creating client with', url);
       getSupabaseClient._client = window.supabase.createClient(url, key);
     }
     return getSupabaseClient._client;
@@ -106,13 +107,13 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* ---------- Uploader (a prueba de balas) ---------- */
+/* ---------- Uploader (robusto + logs) ---------- */
 browseBtn?.addEventListener('click', ()=>{
-  if(!fileInput){ console.warn('fileInput no encontrado'); return; }
+  if(!fileInput){ console.warn('[uploader] fileInput no encontrado'); return; }
   fileInput.click();
 });
 upZone?.addEventListener('click', (e)=>{
-  if(!fileInput){ console.warn('fileInput no encontrado'); return; }
+  if(!fileInput){ console.warn('[uploader] fileInput no encontrado'); return; }
   if (e.target && e.target.id === 'browseBtn') return;
   fileInput.click();
 });
@@ -134,6 +135,7 @@ function handleFile(file){
   if(!ALLOWED_MIME.includes(file.type)) { showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error'); return; }
   const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
   fileRef=file;
+  console.log('[uploader] file ok:', file.name, file.type, file.size);
   if(file.type==='application/pdf'){
     const url=URL.createObjectURL(file);
     const emb=document.createElement('embed');
@@ -158,16 +160,27 @@ authBtn?.addEventListener('click', ()=>{
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
 authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
+// SIGNUP con redirect explícito
 doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   if(authState) authState.textContent = 'Creando cuenta...';
-  const { error } = await sb.auth.signUp({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+
+  const email = (authEmail?.value||'').trim();
+  const password = authPass?.value || '';
+  const redirectTo = `${location.origin}/auth-callback.html`;
+
+  const { error } = await sb.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectTo }
+  });
+
   if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
-  if(authState) authState.textContent='Cuenta creada. Sesión iniciada.';
-  closeModal(authModal); await loadAndRender();
+  if(authState) authState.textContent='Te enviamos un correo de verificación. Abre el enlace para activar tu cuenta.';
 });
 
+// LOGIN
 doLogin?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
