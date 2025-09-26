@@ -11,7 +11,7 @@
 
   <!-- CSS principal -->
   <link rel="stylesheet" href="./styles.css?v=2" />
-  <link rel="icon" href="data:,"> <!-- evita 404 de favicon -->
+  <link rel="icon" href="data:,">
 
   <!-- Librerías externas (orden importante) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
@@ -19,16 +19,14 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- SUPABASE CONFIG (usa las credenciales de tu proyecto) -->
+  <!-- SUPABASE CONFIG (estático; o usa variables de entorno en Vercel) -->
   <script>
-    // Si usas variables de entorno en Vercel, puedes dejar esto vacío.
-    // Para sitio estático, define aquí:
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
   <!-- Tu JS principal -->
-  <script src="./script.js?v=4" defer></script>
+  <script src="./script.js?v=5" defer></script>
 </head>
 <body>
   <noscript>
