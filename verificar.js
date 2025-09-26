@@ -62,7 +62,6 @@ document.getElementById('useQuery')?.addEventListener('click', ()=>{
   if (c && h) verify(c, h);
 });
 
-// Autocompletar si viene desde QR
 window.addEventListener('DOMContentLoaded', ()=>{
   const { c, h } = getParams();
   if (c) document.getElementById('vc').value = c;
