@@ -4,16 +4,8 @@
 function getSupabaseClient() {
   try {
     const hasSDK = !!window.supabase && typeof window.supabase.createClient === 'function';
-    const url = (window?.ENV?.SUPABASE_URL) ||
-                window.NEXT_PUBLIC_SUPABASE_URL ||
-                window.__env?.SUPABASE_URL ||
-                window.SB_URL ||
-                (typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SUPABASE_URL : null);
-    const key = (window?.ENV?.SUPABASE_ANON) ||
-                window.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-                window.__env?.SUPABASE_ANON_KEY ||
-                window.SB_KEY ||
-                (typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY : null);
+    const url = window.SB_URL || window.NEXT_PUBLIC_SUPABASE_URL || window.__env?.SUPABASE_URL;
+    const key = window.SB_KEY || window.NEXT_PUBLIC_SUPABASE_ANON_KEY || window.__env?.SUPABASE_ANON_KEY;
     if (!hasSDK || !url || !key) return null;
     if (!getSupabaseClient._client) {
       console.log('[SB] creating client with', url);
@@ -111,14 +103,10 @@ if (horasEl && creditosEl) {
 }
 
 /* ---------- Uploader ---------- */
-browseBtn?.addEventListener('click', ()=>{
-  if(!fileInput){ console.warn('[uploader] fileInput no encontrado'); return; }
-  fileInput.click();
-});
+browseBtn?.addEventListener('click', ()=> fileInput?.click());
 upZone?.addEventListener('click', (e)=>{
-  if(!fileInput){ console.warn('[uploader] fileInput no encontrado'); return; }
   if (e.target && e.target.id === 'browseBtn') return;
-  fileInput.click();
+  fileInput?.click();
 });
 ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev, e=>{
   e.preventDefault(); if(upZone) upZone.style.borderColor='#60a5fa';
@@ -162,7 +150,6 @@ authBtn?.addEventListener('click', ()=>{
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
 authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
-// SIGNUP con redirect explícito
 doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
@@ -182,7 +169,6 @@ doSignup?.addEventListener('click', async ()=>{
   if(authState) authState.textContent='Te enviamos un correo de verificación. Abre el enlace para activar tu cuenta.';
 });
 
-// LOGIN
 doLogin?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
@@ -193,8 +179,7 @@ doLogin?.addEventListener('click', async ()=>{
   closeModal(authModal); await loadAndRender();
 });
 
-const sbForSession = getSupabaseClient();
-sbForSession?.auth.onAuthStateChange(async (_evt, session)=>{
+getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
   if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
 });
 
@@ -206,11 +191,12 @@ async function loadAndRender(){
   if(!sb) return;
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  // Para el usuario: solo sus registros (UX)
+  // Solo mis registros NO eliminados
   const { data, error } = await sb
     .from('registros')
     .select('*')
     .eq('usuario_id', session.session.user.id)
+    .is('deleted_at', null)
     .order('created_at', { ascending:false });
   if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
   renderTabla(data);
@@ -243,7 +229,86 @@ tablaBody?.addEventListener('click', async (e)=>{
 });
 
 /* =======================================================
-   Panel Admin
+   Submit (insert + Storage)
+======================================================= */
+form?.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('Supabase no está disponible. Verifica scripts/credenciales.', 'error'); return; }
+
+  const { data: s } = await sb.auth.getSession();
+  if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
+  const user = s.session.user;
+
+  // Validaciones
+  const nombre = (form.nombre?.value||'').trim();
+  const telefono = (form.telefono?.value||'').trim();
+  const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
+  const colegiadoActivo = form.colegiadoActivo?.value;
+  const actividad = (form.actividad?.value||'').trim();
+  const institucion = (form.institucion?.value||'').trim();
+  const tipo = form.tipo?.value;
+  const fecha = form.fecha?.value;
+  const horas = Number(form.horas?.value);
+  const observaciones = (obsEl?.value||'').trim();
+
+  if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
+    showToast('Complete todos los campos obligatorios (*), incluido el número de colegiado.', 'error'); return;
+  }
+  if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
+  if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
+  if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
+  if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
+  if(fileRef){
+    if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); return; }
+    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
+  }
+
+  // Correlativo atómico
+  const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
+  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
+  const correlativo = corrData;
+
+  const creditos = calcCreditos(horas);
+  const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
+
+  // Subir archivo (opcional)
+  let archivo_url = null, archivo_mime = null;
+  if(fileRef){
+    const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path = `${user.id}/${correlativo}-${safeName}`;
+    const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+    if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
+    archivo_url = path; archivo_mime = fileRef.type;
+  }
+
+  // Insert
+  const payload = {
+    usuario_id: user.id,
+    correlativo,
+    nombre, telefono, colegiado_numero: colegiadoNumero, colegiado_activo: colegiadoActivo,
+    actividad, institucion, tipo, fecha,
+    horas, creditos, observaciones,
+    archivo_url, archivo_mime,
+    hash
+  };
+
+  const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
+  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro','error'); return; }
+
+  // PDF
+  await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
+  showToast('Registro guardado y constancia generada.');
+
+  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+  fileRef = null;
+
+  loadAndRender();
+});
+
+/* =======================================================
+   Panel Admin (soft delete + búsqueda)
 ======================================================= */
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
@@ -275,6 +340,7 @@ async function renderAdmin(){
   if(!adminTbody) return;
   adminTbody.innerHTML='';
   for(const r of rows){
+    const estado = r.deleted_at ? 'Eliminado' : 'Activo';
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td>${sanitize(r.correlativo)}</td>
@@ -290,9 +356,10 @@ async function renderAdmin(){
       <td>${r.creditos}</td>
       <td>${r.archivo_url||''}</td>
       <td class="mono">${sanitize(r.hash)}</td>
+      <td>${estado}</td>
       <td>
         <button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button>
-        <button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="del" type="button">Eliminar</button>
+        ${r.deleted_at ? '' : `<button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="del" type="button">Eliminar</button>`}
       </td>`;
     adminTbody.appendChild(tr);
   }
@@ -301,8 +368,7 @@ async function renderAdmin(){
 // Buscar por correlativo
 adminSearchBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
-  const v = (adminSearch?.value||'').trim();
-  currentAdminFilter = v || null;
+  currentAdminFilter = (adminSearch?.value||'').trim() || null;
   await renderAdmin();
 });
 adminClearSearch?.addEventListener('click', async ()=>{
@@ -313,7 +379,7 @@ adminSearch?.addEventListener('keydown', async (e)=>{
   if(e.key==='Enter'){ e.preventDefault(); adminSearchBtn?.click(); }
 });
 
-// Acciones en tabla admin (PDF / Eliminar)
+// Acciones en tabla admin (PDF / Soft Delete)
 document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button[data-action]');
   if(!btn) return;
@@ -330,29 +396,38 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
 
   if(action==='del'){
     const corr = btn.getAttribute('data-corr') || '—';
-    const ok = confirm(`¿Eliminar el registro con correlativo ${corr}? Esta acción no se puede deshacer.`);
+    const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}? Esta acción marcará el registro como eliminado y no será válido para verificación.`);
     if(!ok) return;
-    const { error: delErr } = await sb.from('registros').delete().eq('id', id);
-    if(delErr){ console.error(delErr); showToast('No se pudo eliminar','error'); return; }
-    showToast('Registro eliminado.');
+    // Opción 1: UPDATE directo (RLS exige admin)
+    const { error: upErr } = await sb
+      .from('registros')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
+      .is('deleted_at', null);
+    // Opción 2 (alternativa): llamar al RPC por correlativo
+    // await sb.rpc('soft_delete_by_correlativo', { c: corr });
+
+    if(upErr){ console.error(upErr); showToast('No se pudo eliminar (revisa que tu usuario sea admin).','error'); return; }
+    showToast('Registro marcado como eliminado.');
     await renderAdmin();
   }
 });
 
 // Expiración de sesión admin
 setInterval(()=>{
-  if(!adminBody?.hidden && !adminSessionValid()){
+  if(!adminBody?.hidden && Date.now() >= (window.__ADMIN_END || 0)){
     showToast('Sesión admin expirada','warn');
     if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value='';
   }
 }, 2000);
+function startAdminSession(){ window.__ADMIN_END = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 
-// Exportar TODO (ignora filtros)
+/* Exportar TODO (solo no eliminados) */
 exportCSVBtn?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+  if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').order('created_at',{ascending:false});
-  if(error){ showToast('Error al exportar (revisa RLS)','error'); return; }
+  const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
+  if(error){ showToast('Error al exportar (RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(
@@ -366,10 +441,10 @@ exportCSVBtn?.addEventListener('click', async ()=>{
 });
 
 exportXLSXBtn?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+  if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').order('created_at',{ascending:false});
-  if(error){ showToast('Error al exportar (revisa RLS)','error'); return; }
+  const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
+  if(error){ showToast('Error al exportar (RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -379,7 +454,7 @@ exportXLSXBtn?.addEventListener('click', async ()=>{
 });
 
 /* =======================================================
-   PDF + QR (robusto)
+   PDF + QR
 ======================================================= */
 async function generarConstanciaPDF(rec){
   if (!window.jspdf || !window.jspdf.jsPDF) {
