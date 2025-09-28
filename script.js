@@ -71,6 +71,7 @@ const browseBtn = document.getElementById('browseBtn');
 const preview = document.getElementById('preview');
 let fileRef = null;
 
+// Admin
 const adminModal = document.getElementById('adminModal');
 const openAdminBtn = document.getElementById('openAdminBtn');
 const closeAdmin = document.getElementById('closeAdmin');
@@ -78,10 +79,12 @@ const adminAuth = document.getElementById('adminAuth');
 const adminBody = document.getElementById('adminBody');
 const adminPass = document.getElementById('adminPass');
 const adminLogin = document.getElementById('adminLogin');
+const adminTbody = document.querySelector('#adminTable tbody');
 const exportCSVBtn = document.getElementById('exportCSV');
 const exportXLSXBtn = document.getElementById('exportXLSX');
-const clearDataBtn = document.getElementById('clearData');
-const adminTbody = document.querySelector('#adminTable tbody');
+const adminSearch = document.getElementById('adminSearch');
+const adminSearchBtn = document.getElementById('adminSearchBtn');
+const adminClearSearch = document.getElementById('adminClearSearch');
 const exportStatus = document.getElementById('exportStatus');
 
 // Auth modal
@@ -107,7 +110,7 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* ---------- Uploader (robusto + logs) ---------- */
+/* ---------- Uploader ---------- */
 browseBtn?.addEventListener('click', ()=>{
   if(!fileInput){ console.warn('[uploader] fileInput no encontrado'); return; }
   fileInput.click();
@@ -135,7 +138,6 @@ function handleFile(file){
   if(!ALLOWED_MIME.includes(file.type)) { showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error'); return; }
   const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
   fileRef=file;
-  console.log('[uploader] file ok:', file.name, file.type, file.size);
   if(file.type==='application/pdf'){
     const url=URL.createObjectURL(file);
     const emb=document.createElement('embed');
@@ -204,7 +206,12 @@ async function loadAndRender(){
   if(!sb) return;
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  const { data, error } = await sb.from('registros').select('*').order('created_at', { ascending:false });
+  // Para el usuario: solo sus registros (UX)
+  const { data, error } = await sb
+    .from('registros')
+    .select('*')
+    .eq('usuario_id', session.session.user.id)
+    .order('created_at', { ascending:false });
   if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
   renderTabla(data);
 }
@@ -236,87 +243,7 @@ tablaBody?.addEventListener('click', async (e)=>{
 });
 
 /* =======================================================
-   Submit (insert en Supabase + Storage)
-======================================================= */
-form?.addEventListener('submit', async (e)=>{
-  e.preventDefault();
-
-  const sb = getSupabaseClient();
-  if(!sb){ showToast('Supabase no está disponible. Verifica scripts/credenciales.', 'error'); return; }
-
-  const { data: s, error: sesErr } = await sb.auth.getSession();
-  if(sesErr || !s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
-  const user = s.session.user;
-
-  // Validaciones
-  const nombre = (form.nombre?.value||'').trim();
-  const telefono = (form.telefono?.value||'').trim();
-  const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
-  const colegiadoActivo = form.colegiadoActivo?.value;
-  const actividad = (form.actividad?.value||'').trim();
-  const institucion = (form.institucion?.value||'').trim();
-  const tipo = form.tipo?.value;
-  const fecha = form.fecha?.value;
-  const horas = Number(form.horas?.value);
-  const observaciones = (obsEl?.value||'').trim();
-
-  if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
-    showToast('Complete todos los campos obligatorios (*), incluido el número de colegiado.', 'error'); return;
-  }
-  if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
-  if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
-  if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
-  if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
-  if(fileRef){
-    if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); return; }
-    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
-  }
-
-  // Correlativo atómico
-  const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
-  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
-  const correlativo = corrData;
-
-  const creditos = calcCreditos(horas);
-  const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
-
-  // Subir archivo (opcional)
-  let archivo_url = null, archivo_mime = null;
-  if(fileRef){
-    const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-    const path = `${user.id}/${correlativo}-${safeName}`;
-    const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
-    if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
-    archivo_url = path; archivo_mime = fileRef.type;
-  }
-
-  // Insert
-  const payload = {
-    usuario_id: user.id,
-    correlativo,
-    nombre, telefono, colegiado_numero: colegiadoNumero, colegiado_activo: colegiadoActivo,
-    actividad, institucion, tipo, fecha,
-    horas, creditos, observaciones,
-    archivo_url, archivo_mime,
-    hash
-  };
-
-  const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
-  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro','error'); return; }
-
-  // PDF
-  await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
-  showToast('Registro guardado y constancia generada.');
-
-  // Reset controlado
-  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
-  fileRef = null;
-
-  loadAndRender();
-});
-
-/* =======================================================
-   Panel Admin (local; exporta registros del usuario)
+   Panel Admin
 ======================================================= */
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
@@ -325,18 +252,25 @@ closeAdmin?.addEventListener('click', closeAdminFn);
 window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
 
 let adminSessionEnd = 0;
+let currentAdminFilter = null; // correlativo o null
+
 function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 function adminSessionValid(){ return Date.now() < adminSessionEnd; }
 
 adminLogin?.addEventListener('click', async (ev)=>{
   ev.preventDefault();
   if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
-  if(adminAuth) adminAuth.hidden = true; if(adminBody) adminBody.hidden = false; startAdminSession(); await renderAdmin(); showToast('Sesión admin iniciada','ok');
+  if(adminAuth) adminAuth.hidden = true; if(adminBody) adminBody.hidden = false; startAdminSession();
+  currentAdminFilter = null;
+  await renderAdmin();
+  showToast('Sesión admin iniciada','ok');
 });
 
 async function renderAdmin(){
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').order('created_at', { ascending:false });
+  let q = sb.from('registros').select('*').order('created_at', { ascending:false });
+  if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  const { data: rows, error } = await q;
   if(error){ if(exportStatus) exportStatus.textContent='Error al cargar'; return; }
   if(!adminTbody) return;
   adminTbody.innerHTML='';
@@ -348,25 +282,77 @@ async function renderAdmin(){
       <td>${sanitize(r.telefono)}</td>
       <td>${sanitize(r.colegiado_numero||'')}</td>
       <td>${sanitize(r.colegiado_activo)}</td>
-      <td>${sanitize(r.actividad)}</td>
+      <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,40))}${r.actividad.length>40?'…':''}</td>
       <td>${sanitize(r.institucion)}</td>
       <td>${sanitize(r.tipo)}</td>
       <td>${sanitize(r.fecha)}</td>
       <td>${r.horas}</td>
       <td>${r.creditos}</td>
       <td>${r.archivo_url||''}</td>
-      <td>${sanitize(r.hash)}</td>
-      <td>${r.exportado? 'Sí':'No'}</td>`;
+      <td class="mono">${sanitize(r.hash)}</td>
+      <td>
+        <button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button>
+        <button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="del" type="button">Eliminar</button>
+      </td>`;
     adminTbody.appendChild(tr);
   }
 }
 
-setInterval(()=>{ if(!adminBody?.hidden && !adminSessionValid()){ showToast('Sesión admin expirada','warn'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; } }, 2000);
+// Buscar por correlativo
+adminSearchBtn?.addEventListener('click', async ()=>{
+  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
+  const v = (adminSearch?.value||'').trim();
+  currentAdminFilter = v || null;
+  await renderAdmin();
+});
+adminClearSearch?.addEventListener('click', async ()=>{
+  if(adminBody?.hidden || !adminSessionValid()) return;
+  currentAdminFilter = null; if(adminSearch) adminSearch.value=''; await renderAdmin();
+});
+adminSearch?.addEventListener('keydown', async (e)=>{
+  if(e.key==='Enter'){ e.preventDefault(); adminSearchBtn?.click(); }
+});
 
+// Acciones en tabla admin (PDF / Eliminar)
+document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const action = btn.getAttribute('data-action');
+  const id = btn.getAttribute('data-id');
+
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+
+  if(action==='pdf'){
+    const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
+    if(error || !rows?.length) return showToast('Registro no disponible','error');
+    await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+  }
+
+  if(action==='del'){
+    const corr = btn.getAttribute('data-corr') || '—';
+    const ok = confirm(`¿Eliminar el registro con correlativo ${corr}? Esta acción no se puede deshacer.`);
+    if(!ok) return;
+    const { error: delErr } = await sb.from('registros').delete().eq('id', id);
+    if(delErr){ console.error(delErr); showToast('No se pudo eliminar','error'); return; }
+    showToast('Registro eliminado.');
+    await renderAdmin();
+  }
+});
+
+// Expiración de sesión admin
+setInterval(()=>{
+  if(!adminBody?.hidden && !adminSessionValid()){
+    showToast('Sesión admin expirada','warn');
+    if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value='';
+  }
+}, 2000);
+
+// Exportar TODO (ignora filtros)
 exportCSVBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows } = await sb.from('registros').select('*').order('created_at',{ascending:false});
+  const { data: rows, error } = await sb.from('registros').select('*').order('created_at',{ascending:false});
+  if(error){ showToast('Error al exportar (revisa RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(
@@ -382,17 +368,14 @@ exportCSVBtn?.addEventListener('click', async ()=>{
 exportXLSXBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows } = await sb.from('registros').select('*').order('created_at',{ascending:false});
+  const { data: rows, error } = await sb.from('registros').select('*').order('created_at',{ascending:false});
+  if(error){ showToast('Error al exportar (revisa RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Registros');
   XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
   if(exportStatus) exportStatus.textContent='Excel descargado';
-});
-
-clearDataBtn?.addEventListener('click', ()=>{
-  showToast('Con Supabase, “borrar todo” no está habilitado aquí. Usa la consola si lo necesitas.','warn');
 });
 
 /* =======================================================
