@@ -19,14 +19,14 @@
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- SUPABASE CONFIG (estático; o usa variables de entorno en Vercel) -->
+  <!-- SUPABASE CONFIG -->
   <script>
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
   <!-- Tu JS principal -->
-  <script src="./script.js?v=6" defer></script>
+  <script src="./script.js?v=7" defer></script>
 </head>
 <body>
   <noscript>
@@ -185,12 +185,16 @@
       </div>
 
       <div id="adminBody" hidden>
-        <div class="admin-actions">
-          <button class="btn" id="exportCSV">Exportar CSV</button>
-          <button class="btn" id="exportXLSX">Exportar Excel</button>
-          <button class="btn warn" id="clearData">Borrar todo (local)</button>
+        <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input type="text" id="adminSearch" placeholder="Buscar correlativo (p.ej. CPG-202509-0001)" style="flex:1;min-width:260px" />
+          <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
+          <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
+          <span class="muted" style="margin-left:auto">Exporta SIEMPRE toda la base</span>
+          <button class="btn" id="exportCSV" type="button">Exportar TODO CSV</button>
+          <button class="btn" id="exportXLSX" type="button">Exportar TODO Excel</button>
           <span class="muted" id="exportStatus">—</span>
         </div>
+
         <div class="table-wrap">
           <table class="table" id="adminTable">
             <thead>
@@ -208,7 +212,7 @@
                 <th>Créditos</th>
                 <th>Archivo</th>
                 <th>Hash</th>
-                <th>Exportado</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody></tbody>
