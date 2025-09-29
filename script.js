@@ -27,7 +27,7 @@ const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
 /* === PDF: Logo === */
-const PDF_LOGO_URL = './assets/logo-cpg.png';  // <-- coloca tu archivo aquí
+const PDF_LOGO_URL = './assets/Logo-cpg.png';  // <-- coloca tu archivo aquí
 const PDF_LOGO_W = 64;                         // ancho en puntos (1pt ≈ 1/72 de pulgada)
 const PDF_LOGO_H = 64;                         // alto en puntos
 let __PDF_LOGO_DATAURL = null;                 // cache
