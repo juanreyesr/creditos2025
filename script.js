@@ -26,6 +26,12 @@ const ADMIN_SESSION_MIN = 10;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
+/* === PDF: Logo === */
+const PDF_LOGO_URL = './assets/logo-cpg.png';  // <-- coloca tu archivo aquí
+const PDF_LOGO_W = 64;                         // ancho en puntos (1pt ≈ 1/72 de pulgada)
+const PDF_LOGO_H = 64;                         // alto en puntos
+let __PDF_LOGO_DATAURL = null;                 // cache
+
 function sanitize(str){
   return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
 }
@@ -398,22 +404,18 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     const corr = btn.getAttribute('data-corr') || '—';
     const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}? Esta acción marcará el registro como eliminado y no será válido para verificación.`);
     if(!ok) return;
-    // Opción 1: UPDATE directo (RLS exige admin)
     const { error: upErr } = await sb
       .from('registros')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
       .is('deleted_at', null);
-    // Opción 2 (alternativa): llamar al RPC por correlativo
-    // await sb.rpc('soft_delete_by_correlativo', { c: corr });
-
     if(upErr){ console.error(upErr); showToast('No se pudo eliminar (revisa que tu usuario sea admin).','error'); return; }
     showToast('Registro marcado como eliminado.');
     await renderAdmin();
   }
 });
 
-// Expiración de sesión admin
+// Sesión admin
 setInterval(()=>{
   if(!adminBody?.hidden && Date.now() >= (window.__ADMIN_END || 0)){
     showToast('Sesión admin expirada','warn');
@@ -454,8 +456,37 @@ exportXLSXBtn?.addEventListener('click', async ()=>{
 });
 
 /* =======================================================
-   PDF + QR
+   PDF + QR + LOGO
 ======================================================= */
+async function ensurePdfLogoDataUrl(){
+  if (__PDF_LOGO_DATAURL !== null) return __PDF_LOGO_DATAURL;
+  try {
+    // Cargamos la imagen y la convertimos a dataURL (para jsPDF)
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // por si tu hosting lo permite; si no, igual funciona al ser misma ruta
+    const url = PDF_LOGO_URL;
+    const dataUrl = await new Promise((resolve, reject)=>{
+      img.onload = ()=>{
+        try{
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img,0,0);
+          resolve(canvas.toDataURL('image/png'));
+        }catch(e){ resolve(null); }
+      };
+      img.onerror = ()=> resolve(null);
+      img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
+    });
+    __PDF_LOGO_DATAURL = dataUrl; // puede ser null si no pudo cargar
+    return __PDF_LOGO_DATAURL;
+  } catch {
+    __PDF_LOGO_DATAURL = null;
+    return null;
+  }
+}
+
 async function generarConstanciaPDF(rec){
   if (!window.jspdf || !window.jspdf.jsPDF) {
     console.error('jsPDF no está disponible.'); showToast('jsPDF no cargó.', 'error'); throw new Error('jsPDF missing');
@@ -464,14 +495,31 @@ async function generarConstanciaPDF(rec){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
+  // LOGO (si existe)
+  try {
+    const logo = await ensurePdfLogoDataUrl();
+    if (logo) {
+      // esquina superior izquierda
+      doc.addImage(logo, 'PNG', pad, 36, PDF_LOGO_W, PDF_LOGO_H);
+    }
+  } catch (e) {
+    console.warn('No se pudo insertar logo en PDF:', e);
+  }
+
+  // Título
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
+  // Si pusimos logo, movemos el título un poco a la derecha
+  const titleX = pad + (PDF_LOGO_W ? (PDF_LOGO_W + 12) : 0);
+  doc.text('Constancia de Registro de Créditos Académicos', titleX, 64);
+
   doc.setFontSize(11); doc.setFont('helvetica','normal');
-  doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
+  doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', titleX, 84);
 
+  // Correlativo
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
-  doc.text(`No. ${rec.correlativo}`, pad, 112);
+  doc.text(`No. ${rec.correlativo}`, pad, 120);
 
+  // Datos
   doc.setFont('helvetica','normal'); doc.setFontSize(12);
   const lines = [
     `Nombre: ${rec.nombre}`,
@@ -484,10 +532,11 @@ async function generarConstanciaPDF(rec){
     `Horas: ${rec.horas}`,
     `Créditos (16h = 1): ${rec.creditos}`,
   ];
-  let y = 140; const lineH = 18;
+  let y = 148; const lineH = 18;
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
+  // QR + verificación
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, 96);
@@ -501,6 +550,7 @@ async function generarConstanciaPDF(rec){
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
   }
 
+  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
