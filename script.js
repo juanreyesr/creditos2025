@@ -27,18 +27,18 @@ const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
 /* === PDF: Logo + QR (posiciones) === */
-const PDF_LOGO_URL = './assets/logo-cpg.png';   // ← coloca tu archivo aquí
-const PDF_LOGO_W = 96;                          // ancho logo en puntos (1pt ≈ 1/72 in)
-const PDF_LOGO_H = 96;                          // alto logo en puntos
-const QR_X = 450;                                // X del QR (columna derecha)
-const QR_Y = 64;                                 // Y del QR
-const QR_SIZE = 96;                              // tamaño del QR
-const LOGO_BELOW_GAP = 12;                       // separación QR → logo
+const PDF_LOGO_URL = './assets/Logo-cpg.png';
+const PDF_LOGO_W = 96;
+const PDF_LOGO_H = 96;
+const QR_X = 450;
+const QR_Y = 64;
+const QR_SIZE = 96;
+const LOGO_BELOW_GAP = 12;
 
-let __PDF_LOGO_DATAURL = null;                   // cache logo
+let __PDF_LOGO_DATAURL = null;
 
 function sanitize(str){
-  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;","&quot;":"&quot;","'":"&#39;"}[m] || "&#62;"));
+  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
 }
 function showToast(msg, type="info"){
   const el = document.getElementById('toast');
@@ -113,7 +113,12 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* ---------- Uploader ---------- */
+/* ---------- Uploader (OBLIGATORIO) ---------- */
+function markUploaderError(on=true){
+  if(!upZone) return;
+  upZone.style.transition = 'border-color .2s';
+  upZone.style.borderColor = on ? '#f43f5e' : '#334155';
+}
 browseBtn?.addEventListener('click', ()=> fileInput?.click());
 upZone?.addEventListener('click', (e)=>{
   if (e.target && e.target.id === 'browseBtn') return;
@@ -133,10 +138,23 @@ upZone?.addEventListener('keydown', (e)=>{
 
 function handleFile(file){
   if(!preview) return;
-  preview.innerHTML=''; fileRef=null; if(!file) return;
-  if(!ALLOWED_MIME.includes(file.type)) { showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error'); return; }
-  const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
+  preview.innerHTML=''; fileRef=null;
+  if(!file){ markUploaderError(true); return; }
+
+  if(!ALLOWED_MIME.includes(file.type)) {
+    showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error');
+    markUploaderError(true);
+    return;
+  }
+  const mb=file.size/1024/1024;
+  if(mb>MAX_FILE_MB){
+    showToast('Archivo supera 10 MB.', 'error');
+    markUploaderError(true);
+    return;
+  }
   fileRef=file;
+  markUploaderError(false);
+
   if(file.type==='application/pdf'){
     const url=URL.createObjectURL(file);
     const emb=document.createElement('embed');
@@ -202,7 +220,6 @@ async function loadAndRender(){
   if(!sb) return;
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  // Solo mis registros NO eliminados
   const { data, error } = await sb
     .from('registros')
     .select('*')
@@ -240,7 +257,7 @@ tablaBody?.addEventListener('click', async (e)=>{
 });
 
 /* =======================================================
-   Submit (insert + Storage)
+   Submit (insert + Storage) — Comprobante OBLIGATORIO
 ======================================================= */
 form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -252,7 +269,7 @@ form?.addEventListener('submit', async (e)=>{
   if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
   const user = s.session.user;
 
-  // Validaciones
+  // Validaciones de campos
   const nombre = (form.nombre?.value||'').trim();
   const telefono = (form.telefono?.value||'').trim();
   const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
@@ -271,9 +288,23 @@ form?.addEventListener('submit', async (e)=>{
   if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
   if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
   if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
-  if(fileRef){
-    if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); return; }
-    const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); return; }
+
+  // *** Comprobante OBLIGATORIO ***
+  if(!fileRef){
+    showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error');
+    markUploaderError(true);
+    try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
+    upZone?.focus?.();
+    return;
+  }
+
+  // Validar archivo por seguridad
+  if(!ALLOWED_MIME.includes(fileRef.type)){
+    showToast('Archivo no permitido.', 'error'); markUploaderError(true); return;
+  }
+  const sizeMB = fileRef.size/1024/1024;
+  if(sizeMB>MAX_FILE_MB){
+    showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return;
   }
 
   // Correlativo atómico
@@ -284,9 +315,9 @@ form?.addEventListener('submit', async (e)=>{
   const creditos = calcCreditos(horas);
   const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
-  // Subir archivo (opcional)
+  // Subir archivo (OBLIGATORIO)
   let archivo_url = null, archivo_mime = null;
-  if(fileRef){
+  {
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
     const path = `${user.id}/${correlativo}-${safeName}`;
     const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
@@ -312,8 +343,11 @@ form?.addEventListener('submit', async (e)=>{
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
 
-  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+  form.reset();
+  if(preview) preview.innerHTML='';
+  if(creditosEl) creditosEl.value='';
   fileRef = null;
+  markUploaderError(false);
 
   loadAndRender();
 });
@@ -328,7 +362,7 @@ closeAdmin?.addEventListener('click', closeAdminFn);
 window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
 
 let adminSessionEnd = 0;
-let currentAdminFilter = null; // correlativo o null
+let currentAdminFilter = null;
 
 function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 function adminSessionValid(){ return Date.now() < adminSessionEnd; }
@@ -499,18 +533,15 @@ async function generarConstanciaPDF(rec){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
-  // Título (ahora siempre desde el margen izquierdo)
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
 
   doc.setFontSize(11); doc.setFont('helvetica','normal');
   doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
 
-  // Correlativo
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
   doc.text(`No. ${rec.correlativo}`, pad, 112);
 
-  // Datos
   doc.setFont('helvetica','normal'); doc.setFontSize(12);
   const lines = [
     `Nombre: ${rec.nombre}`,
@@ -528,7 +559,6 @@ async function generarConstanciaPDF(rec){
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
   // QR (derecha)
-  let qrDrawn = false;
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -537,17 +567,16 @@ async function generarConstanciaPDF(rec){
       doc.setFontSize(10); doc.setTextColor(120);
       doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790);
       doc.text(verifyUrl, pad, 805, { maxWidth: 500 });
-      qrDrawn = true;
     }
   } catch (err) {
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
   }
 
-  // LOGO debajo del QR (si existe logo; si no hubo QR, igualmente lo colocamos en esa columna)
+  // LOGO debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
-      const logoY = QR_Y + QR_SIZE + LOGO_BELOW_GAP; // justo bajo el QR
+      const logoY = QR_Y + QR_SIZE + LOGO_BELOW_GAP;
       doc.addImage(logo, 'PNG', QR_X, logoY, PDF_LOGO_W, PDF_LOGO_H);
     }
   } catch (e) {
