@@ -26,14 +26,19 @@ const ADMIN_SESSION_MIN = 10;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
-/* === PDF: Logo === */
-const PDF_LOGO_URL = './assets/Logo-cpg.png';  // <-- coloca tu archivo aquí
-const PDF_LOGO_W = 64;                         // ancho en puntos (1pt ≈ 1/72 de pulgada)
-const PDF_LOGO_H = 64;                         // alto en puntos
-let __PDF_LOGO_DATAURL = null;                 // cache
+/* === PDF: Logo + QR (posiciones) === */
+const PDF_LOGO_URL = './assets/logo-cpg.png';   // ← coloca tu archivo aquí
+const PDF_LOGO_W = 96;                          // ancho logo en puntos (1pt ≈ 1/72 in)
+const PDF_LOGO_H = 96;                          // alto logo en puntos
+const QR_X = 450;                                // X del QR (columna derecha)
+const QR_Y = 64;                                 // Y del QR
+const QR_SIZE = 96;                              // tamaño del QR
+const LOGO_BELOW_GAP = 12;                       // separación QR → logo
+
+let __PDF_LOGO_DATAURL = null;                   // cache logo
 
 function sanitize(str){
-  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
+  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;","&quot;":"&quot;","'":"&#39;"}[m] || "&#62;"));
 }
 function showToast(msg, type="info"){
   const el = document.getElementById('toast');
@@ -456,16 +461,15 @@ exportXLSXBtn?.addEventListener('click', async ()=>{
 });
 
 /* =======================================================
-   PDF + QR + LOGO
+   PDF + QR + LOGO (debajo del QR)
 ======================================================= */
 async function ensurePdfLogoDataUrl(){
   if (__PDF_LOGO_DATAURL !== null) return __PDF_LOGO_DATAURL;
   try {
-    // Cargamos la imagen y la convertimos a dataURL (para jsPDF)
     const img = new Image();
-    img.crossOrigin = 'anonymous'; // por si tu hosting lo permite; si no, igual funciona al ser misma ruta
+    img.crossOrigin = 'anonymous';
     const url = PDF_LOGO_URL;
-    const dataUrl = await new Promise((resolve, reject)=>{
+    const dataUrl = await new Promise((resolve)=>{
       img.onload = ()=>{
         try{
           const canvas = document.createElement('canvas');
@@ -479,7 +483,7 @@ async function ensurePdfLogoDataUrl(){
       img.onerror = ()=> resolve(null);
       img.src = url + (url.includes('?') ? '&' : '?') + 'cachebust=' + Date.now();
     });
-    __PDF_LOGO_DATAURL = dataUrl; // puede ser null si no pudo cargar
+    __PDF_LOGO_DATAURL = dataUrl;
     return __PDF_LOGO_DATAURL;
   } catch {
     __PDF_LOGO_DATAURL = null;
@@ -495,29 +499,16 @@ async function generarConstanciaPDF(rec){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
-  // LOGO (si existe)
-  try {
-    const logo = await ensurePdfLogoDataUrl();
-    if (logo) {
-      // esquina superior izquierda
-      doc.addImage(logo, 'PNG', pad, 36, PDF_LOGO_W, PDF_LOGO_H);
-    }
-  } catch (e) {
-    console.warn('No se pudo insertar logo en PDF:', e);
-  }
-
-  // Título
+  // Título (ahora siempre desde el margen izquierdo)
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  // Si pusimos logo, movemos el título un poco a la derecha
-  const titleX = pad + (PDF_LOGO_W ? (PDF_LOGO_W + 12) : 0);
-  doc.text('Constancia de Registro de Créditos Académicos', titleX, 64);
+  doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
 
   doc.setFontSize(11); doc.setFont('helvetica','normal');
-  doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', titleX, 84);
+  doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
 
   // Correlativo
   doc.setFont('helvetica','bold'); doc.setFontSize(13);
-  doc.text(`No. ${rec.correlativo}`, pad, 120);
+  doc.text(`No. ${rec.correlativo}`, pad, 112);
 
   // Datos
   doc.setFont('helvetica','normal'); doc.setFontSize(12);
@@ -532,22 +523,35 @@ async function generarConstanciaPDF(rec){
     `Horas: ${rec.horas}`,
     `Créditos (16h = 1): ${rec.creditos}`,
   ];
-  let y = 148; const lineH = 18;
+  let y = 140; const lineH = 18;
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR + verificación
+  // QR (derecha)
+  let qrDrawn = false;
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
-    const qrDataUrl = await getQrDataUrl(verifyUrl, 96);
+    const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
     if (qrDataUrl) {
-      doc.addImage(qrDataUrl, 'PNG', 450, 64, 96, 96);
+      doc.addImage(qrDataUrl, 'PNG', QR_X, QR_Y, QR_SIZE, QR_SIZE);
       doc.setFontSize(10); doc.setTextColor(120);
       doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790);
       doc.text(verifyUrl, pad, 805, { maxWidth: 500 });
+      qrDrawn = true;
     }
   } catch (err) {
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
+  }
+
+  // LOGO debajo del QR (si existe logo; si no hubo QR, igualmente lo colocamos en esa columna)
+  try {
+    const logo = await ensurePdfLogoDataUrl();
+    if (logo) {
+      const logoY = QR_Y + QR_SIZE + LOGO_BELOW_GAP; // justo bajo el QR
+      doc.addImage(logo, 'PNG', QR_X, logoY, PDF_LOGO_W, PDF_LOGO_H);
+    }
+  } catch (e) {
+    console.warn('No se pudo insertar logo en PDF:', e);
   }
 
   // Pie
