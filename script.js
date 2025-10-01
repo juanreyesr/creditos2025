@@ -1,6 +1,14 @@
 /* =======================================================
-   Supabase lazy init
+   Supabase lazy init + helpers de carga SDK
 ======================================================= */
+async function waitForSupabaseSDK() {
+  let tries = 0;
+  while ((!window.supabase || !window.supabase.createClient) && tries < 200) {
+    await new Promise(r => setTimeout(r, 25));
+    tries++;
+  }
+  return !!(window.supabase && window.supabase.createClient);
+}
 function getSupabaseClient() {
   try {
     const hasSDK = !!window.supabase && typeof window.supabase.createClient === 'function';
@@ -36,10 +44,11 @@ const QR_SIZE = 96;
 const LOGO_BELOW_GAP = 12;
 
 let __PDF_LOGO_DATAURL = null;
-
-/* === Estado global de admin === */
 let __IS_ADMIN = false;
 
+/* =======================================================
+   Utils UI
+======================================================= */
 function sanitize(str){
   return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
 }
@@ -99,6 +108,7 @@ const adminNoRights = document.getElementById('adminNoRights');
 
 // Auth modal
 const authBtn = document.getElementById('authBtn');
+const logoutBtn = document.getElementById('logoutBtn');
 const authModal = document.getElementById('authModal');
 const closeAuth = document.getElementById('closeAuth');
 const authEmail = document.getElementById('authEmail');
@@ -109,14 +119,13 @@ const doRecover = document.getElementById('doRecover');
 const authState = document.getElementById('authState');
 
 /* =======================================================
-   Inicialización UI + Auth
+   Inicialización básica
 ======================================================= */
 (function(){
   const now=new Date();
   if(fechaEl) fechaEl.max = now.toISOString().slice(0,10);
   try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
 })();
-
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
@@ -143,35 +152,18 @@ fileInput?.addEventListener('change', (e)=> handleFile(e.target.files?.[0]||null
 upZone?.addEventListener('keydown', (e)=>{
   if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput?.click(); }
 });
-
 function handleFile(file){
   if(!preview) return;
   preview.innerHTML=''; fileRef=null;
   if(!file){ markUploaderError(true); return; }
-
-  if(!ALLOWED_MIME.includes(file.type)) {
-    showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error');
-    markUploaderError(true);
-    return;
-  }
-  const mb=file.size/1024/1024;
-  if(mb>MAX_FILE_MB){
-    showToast('Archivo supera 10 MB.', 'error');
-    markUploaderError(true);
-    return;
-  }
-  fileRef=file;
-  markUploaderError(false);
-
+  if(!ALLOWED_MIME.includes(file.type)) { showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error'); markUploaderError(true); return; }
+  const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
+  fileRef=file; markUploaderError(false);
   if(file.type==='application/pdf'){
-    const url=URL.createObjectURL(file);
-    const emb=document.createElement('embed');
-    emb.src=url; emb.type='application/pdf'; emb.className='pdf';
-    preview.appendChild(emb);
+    const url=URL.createObjectURL(file); const emb=document.createElement('embed');
+    emb.src=url; emb.type='application/pdf'; emb.className='pdf'; preview.appendChild(emb);
   } else {
-    const img=document.createElement('img');
-    img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(file);
-    preview.appendChild(img);
+    const img=document.createElement('img'); img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(file); preview.appendChild(img);
   }
 }
 
@@ -179,10 +171,21 @@ function handleFile(file){
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
-authBtn?.addEventListener('click', ()=>{
-  const sb = getSupabaseClient();
-  if(!sb){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
+authBtn?.addEventListener('click', async ()=>{
+  const ok = await waitForSupabaseSDK();
+  if(!ok || !getSupabaseClient()){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
   openModal(authModal);
+});
+logoutBtn?.addEventListener('click', async ()=>{
+  const sb = getSupabaseClient(); if(!sb) return;
+  try {
+    await sb.auth.signOut();
+    showToast('Sesión cerrada');
+    await refreshAdminState();
+    await loadAndRender();
+  } catch (e) {
+    showToast('No se pudo cerrar sesión', 'error');
+  }
 });
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
 authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
@@ -191,48 +194,58 @@ doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   if(authState) authState.textContent = 'Creando cuenta...';
-
-  const email = (authEmail?.value||'').trim();
-  const password = authPass?.value || '';
-  const redirectTo = `${location.origin}/auth-callback.html`;
-
-  const { error } = await sb.auth.signUp({
-    email,
-    password,
-    options: { emailRedirectTo: redirectTo }
-  });
-
-  if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
-  if(authState) authState.textContent='Te enviamos un correo de verificación. Abre el enlace para activar tu cuenta.';
+  try {
+    const email = (authEmail?.value||'').trim();
+    const password = authPass?.value || '';
+    const redirectTo = `${location.origin}/auth-callback.html`;
+    const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo }});
+    if(error){ authState.textContent='Error: '+error.message; return; }
+    authState.textContent='Te enviamos un correo de verificación. Abre el enlace para activar tu cuenta.';
+  } catch (e) {
+    authState.textContent='Error inesperado al crear cuenta';
+  }
 });
 
 doLogin?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   if(authState) authState.textContent = 'Ingresando...';
-  const { error } = await sb.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
-  if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
-  if(authState) authState.textContent='OK';
-  closeModal(authModal);
-  await refreshAdminState();
-  await loadAndRender();
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
+    if(error){ authState.textContent='Error: '+error.message; return; }
+    if(!data || !data.session){ authState.textContent='No se pudo iniciar sesión (sin sesión).'; return; }
+    authState.textContent='OK';
+    closeModal(authModal);
+    await refreshAdminState();
+    await loadAndRender();
+  } catch (e) {
+    authState.textContent='Error inesperado al iniciar sesión';
+  } finally {
+    // evita quedarse colgado en "Ingresando..."
+  }
 });
 
-doRecover?.addEventListener('click', async ()=>{
-  const sb = getSupabaseClient();
-  if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
-  const email = (authEmail?.value || '').trim();
-  if(!email){ showToast('Escribe tu email para enviarte el enlace de recuperación.', 'warn'); return; }
-  const redirectTo = `${location.origin}/auth-callback.html`;
-  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
-  if(error){ showToast('Error: ' + error.message, 'error'); return; }
-  showToast('Te enviamos un correo con instrucciones.');
-});
+/* Reacciona a cambios de sesión en todos los dispositivos/ventanas */
+(async ()=>{
+  const ok = await waitForSupabaseSDK();
+  if (!ok) return;
+  const sb = getSupabaseClient(); if(!sb) return;
 
-getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
-  if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
-  await refreshAdminState();
-});
+  sb.auth.onAuthStateChange(async (_evt, session)=>{
+    console.log('[SB] auth state change:', !!session?.user);
+    // Botones
+    if(authBtn) authBtn.style.display = session?.user ? 'none' : 'inline-block';
+    if(logoutBtn) logoutBtn.style.display = session?.user ? 'inline-block' : 'none';
+    await refreshAdminState();
+    await loadAndRender();
+  });
+
+  // fuerza una lectura de sesión al cargar
+  await sb.auth.getSession().catch(()=>{});
+  const { data: initial } = await sb.auth.getSession();
+  if(authBtn) authBtn.style.display = initial?.session?.user ? 'none' : 'inline-block';
+  if(logoutBtn) logoutBtn.style.display = initial?.session?.user ? 'inline-block' : 'none';
+})();
 
 /* =======================================================
    Capa admin: detectar “is_admin” y ajustar UI
@@ -241,32 +254,25 @@ async function refreshAdminState(){
   const sb = getSupabaseClient(); if(!sb) return;
   const { data: s } = await sb.auth.getSession();
   let isAdmin = false;
-
   if (s?.session?.user?.id) {
-    const { data, error } = await sb
-      .from('perfiles')
-      .select('is_admin')
-      .eq('user_id', s.session.user.id)
-      .maybeSingle();
+    const { data, error } = await sb.from('perfiles').select('is_admin').eq('user_id', s.session.user.id).maybeSingle();
     if(!error && data && data.is_admin === true) isAdmin = true;
   }
-
   __IS_ADMIN = isAdmin;
-  // Actualiza insignias
+  // Insignias
+  const adminBadgeTop = document.getElementById('adminBadge');
+  const adminRoleBadge = document.getElementById('adminRoleBadge');
   if (adminBadgeTop) adminBadgeTop.hidden = !__IS_ADMIN;
   if (adminRoleBadge) adminRoleBadge.hidden = !__IS_ADMIN;
-
-  // Nota de puerta de admin
+  // Nota
+  const adminGateNote = document.getElementById('adminGateNote');
   if (adminGateNote) adminGateNote.style.display = __IS_ADMIN ? 'none' : 'block';
-
-  // Si el modal está abierto y no es admin, aseguramos cuerpo oculto
+  // Si modal abierto y no admin, bloquear cuerpo
   if (adminModal?.getAttribute('aria-hidden') === 'false') {
-    if (!__IS_ADMIN) {
-      if (adminBody) adminBody.hidden = true;
-      if (adminNoRights) adminNoRights.hidden = false;
-    } else {
-      if (adminNoRights) adminNoRights.hidden = true;
-    }
+    const adminBody = document.getElementById('adminBody');
+    const adminNoRights = document.getElementById('adminNoRights');
+    if (!__IS_ADMIN) { if (adminBody) adminBody.hidden = true; if (adminNoRights) adminNoRights.hidden = false; }
+    else { if (adminNoRights) adminNoRights.hidden = true; }
   }
 }
 
@@ -278,16 +284,33 @@ async function loadAndRender(){
   if(!sb) return;
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  const { data, error } = await sb
-    .from('registros')
-    .select('*')
-    .eq('usuario_id', session.session.user.id)
-    .is('deleted_at', null)
-    .order('created_at', { ascending:false });
-  if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
-  renderTabla(data);
-}
 
+  // Primer intento: con filtro deleted_at (si existe)
+  let rows = null;
+  let err1 = null;
+  try {
+    const { data, error } = await sb
+      .from('registros')
+      .select('*')
+      .eq('usuario_id', session.session.user.id)
+      .is('deleted_at', null)
+      .order('created_at', { ascending:false });
+    if (error) throw error;
+    rows = data;
+  } catch (e) {
+    err1 = e;
+    console.warn('[SB] fallback sin deleted_at:', e?.message || e);
+    // Fallback por si el esquema aún no tiene deleted_at
+    const { data, error } = await sb
+      .from('registros')
+      .select('*')
+      .eq('usuario_id', session.session.user.id)
+      .order('created_at', { ascending:false });
+    if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
+    rows = data;
+  }
+  renderTabla(rows||[]);
+}
 function renderTabla(rows){
   if(!tablaBody) return;
   tablaBody.innerHTML='';
@@ -296,14 +319,13 @@ function renderTabla(rows){
     tr.innerHTML = `
       <td>${sanitize(r.correlativo)}</td>
       <td>${sanitize(r.fecha)}</td>
-      <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,30))}${r.actividad.length>30?'…':''}</td>
+      <td title="${sanitize(r.actividad)}">${sanitize((r.actividad||'').slice(0,30))}${(r.actividad||'').length>30?'…':''}</td>
       <td>${r.horas}</td>
       <td>${r.creditos}</td>
       <td><button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button></td>`;
     tablaBody.appendChild(tr);
   }
 }
-
 tablaBody?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button[data-action="pdf"]');
   if(!btn) return;
@@ -327,7 +349,7 @@ form?.addEventListener('submit', async (e)=>{
   if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
   const user = s.session.user;
 
-  // Validaciones de campos
+  // Validaciones
   const nombre = (form.nombre?.value||'').trim();
   const telefono = (form.telefono?.value||'').trim();
   const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
@@ -347,25 +369,16 @@ form?.addEventListener('submit', async (e)=>{
   if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
   if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
 
-  // *** Comprobante OBLIGATORIO ***
+  // Comprobante obligatorio
   if(!fileRef){
     showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error');
-    markUploaderError(true);
-    try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
-    upZone?.focus?.();
-    return;
+    markUploaderError(true); try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
+    upZone?.focus?.(); return;
   }
+  if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
+  const sizeMB = fileRef.size/1024/1024; if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
 
-  // Validar archivo por seguridad
-  if(!ALLOWED_MIME.includes(fileRef.type)){
-    showToast('Archivo no permitido.', 'error'); markUploaderError(true); return;
-  }
-  const sizeMB = fileRef.size/1024/1024;
-  if(sizeMB>MAX_FILE_MB){
-    showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return;
-  }
-
-  // Correlativo atómico
+  // Correlativo
   const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
   if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
   const correlativo = corrData;
@@ -373,7 +386,7 @@ form?.addEventListener('submit', async (e)=>{
   const creditos = calcCreditos(horas);
   const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
-  // Subir archivo (OBLIGATORIO)
+  // Subir archivo
   let archivo_url = null, archivo_mime = null;
   {
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
@@ -400,13 +413,8 @@ form?.addEventListener('submit', async (e)=>{
   // PDF
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
-
-  form.reset();
-  if(preview) preview.innerHTML='';
-  if(creditosEl) creditosEl.value='';
-  fileRef = null;
-  markUploaderError(false);
-
+  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+  fileRef = null; markUploaderError(false);
   loadAndRender();
 });
 
@@ -416,49 +424,29 @@ form?.addEventListener('submit', async (e)=>{
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
 openAdminBtn?.addEventListener('click', async ()=>{
+  const ok = await waitForSupabaseSDK(); if(!ok){ showToast('Supabase no disponible.','error'); return; }
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  // Verificar sesión
   const { data: s } = await sb.auth.getSession();
   if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; }
-  // Sin privilegios, mostramos aviso
   await refreshAdminState();
   openAdmin();
-  if(!__IS_ADMIN){
-    if(adminBody) adminBody.hidden = true;
-    if(adminAuth) adminAuth.hidden = false;
-    if(adminNoRights) adminNoRights.hidden = false;
-  } else {
-    if(adminNoRights) adminNoRights.hidden = true;
-  }
+  if(!__IS_ADMIN){ if(adminBody) adminBody.hidden = true; if(adminAuth) adminAuth.hidden = false; if(adminNoRights) adminNoRights.hidden = false; }
+  else { if(adminNoRights) adminNoRights.hidden = true; }
 });
 closeAdmin?.addEventListener('click', closeAdminFn);
-window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
+window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); });
 
 let adminSessionEnd = 0;
 let currentAdminFilter = null;
-
 function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 function adminSessionValid(){ return Date.now() < adminSessionEnd; }
 
 adminLogin?.addEventListener('click', async (ev)=>{
   ev.preventDefault();
-
-  // Requiere ser admin por RLS + flag UI
-  if(!__IS_ADMIN){
-    showToast('Tu cuenta no tiene privilegios de administrador.','error');
-    return;
-  }
-
-  if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){
-    showToast('Contraseña incorrecta','error');
-    return;
-  }
-  if(adminAuth) adminAuth.hidden = true;
-  if(adminBody) adminBody.hidden = false;
-  startAdminSession();
-  currentAdminFilter = null;
-  await renderAdmin();
-  showToast('Sesión admin iniciada','ok');
+  if(!__IS_ADMIN){ showToast('Tu cuenta no tiene privilegios de administrador.','error'); return; }
+  if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
+  if(adminAuth) adminAuth.hidden = true; if(adminBody) adminBody.hidden = false; startAdminSession();
+  currentAdminFilter = null; await renderAdmin(); showToast('Sesión admin iniciada','ok');
 });
 
 async function renderAdmin(){
@@ -478,7 +466,7 @@ async function renderAdmin(){
       <td>${sanitize(r.telefono)}</td>
       <td>${sanitize(r.colegiado_numero||'')}</td>
       <td>${sanitize(r.colegiado_activo)}</td>
-      <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,40))}${r.actividad.length>40?'…':''}</td>
+      <td title="${sanitize(r.actividad)}">${sanitize((r.actividad||'').slice(0,40))}${(r.actividad||'').length>40?'…':''}</td>
       <td>${sanitize(r.institucion)}</td>
       <td>${sanitize(r.tipo)}</td>
       <td>${sanitize(r.fecha)}</td>
@@ -494,8 +482,6 @@ async function renderAdmin(){
     adminTbody.appendChild(tr);
   }
 }
-
-// Buscar por correlativo
 adminSearchBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   currentAdminFilter = (adminSearch?.value||'').trim() || null;
@@ -505,17 +491,11 @@ adminClearSearch?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || !adminSessionValid()) return;
   currentAdminFilter = null; if(adminSearch) adminSearch.value=''; await renderAdmin();
 });
-adminSearch?.addEventListener('keydown', async (e)=>{
-  if(e.key==='Enter'){ e.preventDefault(); adminSearchBtn?.click(); }
-});
-
-// Acciones en tabla admin (PDF / Soft Delete)
 document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
   const btn = e.target.closest('button[data-action]');
   if(!btn) return;
   const action = btn.getAttribute('data-action');
   const id = btn.getAttribute('data-id');
-
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
 
   if(action==='pdf'){
@@ -523,29 +503,16 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     if(error || !rows?.length) return showToast('Registro no disponible','error');
     await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
   }
-
   if(action==='del'){
     const corr = btn.getAttribute('data-corr') || '—';
     const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}? Esta acción marcará el registro como eliminado y no será válido para verificación.`);
     if(!ok) return;
-    const { error: upErr } = await sb
-      .from('registros')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-      .is('deleted_at', null);
+    const { error: upErr } = await sb.from('registros').update({ deleted_at: new Date().toISOString() }).eq('id', id).is('deleted_at', null);
     if(upErr){ console.error(upErr); showToast('No se pudo eliminar (revisa permisos/RLS).','error'); return; }
-    showToast('Registro marcado como eliminado.');
-    await renderAdmin();
+    showToast('Registro marcado como eliminado.'); await renderAdmin();
   }
 });
-
-// Sesión admin
-setInterval(()=>{
-  if(!adminBody?.hidden && Date.now() >= (window.__ADMIN_END || 0)){
-    showToast('Sesión admin expirada','warn');
-    if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value='';
-  }
-}, 2000);
+setInterval(()=>{ if(!adminBody?.hidden && Date.now() >= (window.__ADMIN_END || 0)){ showToast('Sesión admin expirada','warn'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; } }, 2000);
 function startAdminSession(){ window.__ADMIN_END = Date.now() + ADMIN_SESSION_MIN*60*1000; }
 
 /* Exportar TODO (solo no eliminados) */
@@ -556,26 +523,18 @@ exportCSVBtn?.addEventListener('click', async ()=>{
   if(error){ showToast('Error al exportar (RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
-  const csv = [headers.join(',')].concat(
-    rows.map(o=> `"${headers.map(h=>String(o[h]??'').replace(/"/g,'""')).join('","')}"`)
-  ).join('\n');
+  const csv = [headers.join(',')].concat(rows.map(o=> `"${headers.map(h=>String(o[h]??'').replace(/"/g,'""')).join('","')}"`)).join('\n');
   const blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=`registros_cpg_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-  URL.revokeObjectURL(url);
+  const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`registros_cpg_${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
   if(exportStatus) exportStatus.textContent='CSV descargado';
 });
-
 exportXLSXBtn?.addEventListener('click', async ()=>{
   if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
   if(error){ showToast('Error al exportar (RLS)','error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Registros');
-  XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
+  const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Registros'); XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
   if(exportStatus) exportStatus.textContent='Excel descargado';
 });
 
@@ -604,16 +563,10 @@ async function ensurePdfLogoDataUrl(){
     });
     __PDF_LOGO_DATAURL = dataUrl;
     return __PDF_LOGO_DATAURL;
-  } catch {
-    __PDF_LOGO_DATAURL = null;
-    return null;
-  }
+  } catch { __PDF_LOGO_DATAURL = null; return null; }
 }
-
 async function generarConstanciaPDF(rec){
-  if (!window.jspdf || !window.jspdf.jsPDF) {
-    console.error('jsPDF no está disponible.'); showToast('jsPDF no cargó.', 'error'); throw new Error('jsPDF missing');
-  }
+  if (!window.jspdf || !window.jspdf.jsPDF) { console.error('jsPDF no está disponible.'); showToast('jsPDF no cargó.', 'error'); throw new Error('jsPDF missing'); }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
@@ -643,7 +596,6 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR (derecha)
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -657,46 +609,27 @@ async function generarConstanciaPDF(rec){
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
   }
 
-  // LOGO debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
       const logoY = QR_Y + QR_SIZE + LOGO_BELOW_GAP;
       doc.addImage(logo, 'PNG', QR_X, logoY, PDF_LOGO_W, PDF_LOGO_H);
     }
-  } catch (e) {
-    console.warn('No se pudo insertar logo en PDF:', e);
-  }
+  } catch (e) { console.warn('No se pudo insertar logo en PDF:', e); }
 
-  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
   doc.save(`Constancia_${rec.correlativo}.pdf`);
 }
-
-function getBase64Image(img){
-  const canvas=document.createElement('canvas');
-  canvas.width=img.naturalWidth || img.width;
-  canvas.height=img.naturalHeight || img.height;
-  const ctx=canvas.getContext('2d');
-  ctx.drawImage(img,0,0);
-  return canvas.toDataURL('image/png');
-}
-function getBase64FromCanvas(canvas){
-  try { return canvas.toDataURL('image/png'); }
-  catch(e){ console.error('No se pudo leer canvas como dataURL:', e); return null; }
-}
+function getBase64Image(img){ const canvas=document.createElement('canvas'); canvas.width=img.naturalWidth||img.width; canvas.height=img.naturalHeight||img.height; const ctx=canvas.getContext('2d'); ctx.drawImage(img,0,0); return canvas.toDataURL('image/png'); }
+function getBase64FromCanvas(canvas){ try { return canvas.toDataURL('image/png'); } catch(e){ console.error('No se pudo leer canvas como dataURL:', e); return null; } }
 async function getQrDataUrl(text, size=96){
-  if (typeof QRCode === 'undefined') {
-    console.warn('QRCode.js no está disponible.'); return null;
-  }
+  if (typeof QRCode === 'undefined') { console.warn('QRCode.js no está disponible.'); return null; }
   return new Promise((resolve)=>{
     const tmp = document.createElement('div');
     new QRCode(tmp, { text, width:size, height:size, correctLevel: QRCode.CorrectLevel.M });
-    const img = tmp.querySelector('img');
-    const canvas = tmp.querySelector('canvas');
-
+    const img = tmp.querySelector('img'); const canvas = tmp.querySelector('canvas');
     if (canvas) return resolve(getBase64FromCanvas(canvas));
     if (img) {
       if (img.complete) { try { return resolve(getBase64Image(img)); } catch { return resolve(null); } }
@@ -709,9 +642,19 @@ async function getQrDataUrl(text, size=96){
 }
 
 /* =======================================================
-   Carga inicial
+   Carga inicial (espera SDK y refresca todo)
 ======================================================= */
 (async () => {
+  const ok = await waitForSupabaseSDK();
+  if (!ok) { console.error('[SB] SDK no disponible'); return; }
+  const sb = getSupabaseClient();
+  if (!sb) { console.error('[SB] Cliente no creado'); return; }
+
+  // Actualiza botones según sesión inicial
+  const { data: initial } = await sb.auth.getSession();
+  if(authBtn) authBtn.style.display = initial?.session?.user ? 'none' : 'inline-block';
+  if(logoutBtn) logoutBtn.style.display = initial?.session?.user ? 'inline-block' : 'none';
+
   await refreshAdminState();
-  loadAndRender();
+  await loadAndRender();
 })();
