@@ -21,7 +21,7 @@ function getSupabaseClient() {
 /* =======================================================
    Config/Utils
 ======================================================= */
-const ADMIN_PASSWORD = "CAEDUC2025";
+const ADMIN_PASSWORD = "CAEDUC2025";      // PIN rápido (plan B)
 const ADMIN_SESSION_MIN = 10;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
@@ -36,6 +36,7 @@ const QR_SIZE = 96;
 const LOGO_BELOW_GAP = 12;
 
 let __PDF_LOGO_DATAURL = null;
+let __IS_ADMIN = false;       // <- se determina desde perfiles.is_admin
 
 function sanitize(str){
   return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
@@ -88,7 +89,9 @@ const exportXLSXBtn = document.getElementById('exportXLSX');
 const adminSearch = document.getElementById('adminSearch');
 const adminSearchBtn = document.getElementById('adminSearchBtn');
 const adminClearSearch = document.getElementById('adminClearSearch');
+const includeDeleted = document.getElementById('includeDeleted');
 const exportStatus = document.getElementById('exportStatus');
+const adminBadge = document.getElementById('adminBadge');
 
 // Auth modal
 const authBtn = document.getElementById('authBtn');
@@ -98,6 +101,7 @@ const authEmail = document.getElementById('authEmail');
 const authPass = document.getElementById('authPass');
 const doLogin = document.getElementById('doLogin');
 const doSignup = document.getElementById('doSignup');
+const forgotPass = document.getElementById('forgotPass');
 const authState = document.getElementById('authState');
 
 /* =======================================================
@@ -111,6 +115,21 @@ const authState = document.getElementById('authState');
 
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
+}
+
+/* ---------- Auth helpers ---------- */
+async function getSessionUser(){
+  const sb = getSupabaseClient(); if(!sb) return null;
+  const { data } = await sb.auth.getSession();
+  return data?.session?.user || null;
+}
+async function refreshIsAdmin(){
+  const sb = getSupabaseClient(); if(!sb) return false;
+  const user = await getSessionUser();
+  if(!user){ __IS_ADMIN = false; return false; }
+  const { data, error } = await sb.from('perfiles').select('is_admin').eq('user_id', user.id).maybeSingle();
+  __IS_ADMIN = !!(data?.is_admin);
+  return __IS_ADMIN;
 }
 
 /* ---------- Uploader (OBLIGATORIO) ---------- */
@@ -171,11 +190,12 @@ function handleFile(file){
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
-authBtn?.addEventListener('click', ()=>{
+authBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
   openModal(authModal);
 });
+
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
 authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
@@ -205,7 +225,20 @@ doLogin?.addEventListener('click', async ()=>{
   const { error } = await sb.auth.signInWithPassword({ email: (authEmail?.value||'').trim(), password: authPass?.value || '' });
   if(error){ if(authState) authState.textContent='Error: '+error.message; return; }
   if(authState) authState.textContent='OK';
-  closeModal(authModal); await loadAndRender();
+  closeModal(authModal);
+  await refreshIsAdmin();
+  await loadAndRender();
+});
+
+forgotPass?.addEventListener('click', async ()=>{
+  const sb = getSupabaseClient();
+  if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
+  const email = (authEmail?.value||'').trim();
+  if(!email){ showToast('Escribe tu correo para enviarte el enlace de recuperación.', 'warn'); return; }
+  const redirectTo = `${location.origin}/auth-callback.html`;
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+  if(error){ showToast('Error al solicitar recuperación: '+error.message, 'error'); return; }
+  showToast('Si el correo existe, enviamos un enlace de recuperación.');
 });
 
 getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
@@ -218,8 +251,10 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
 async function loadAndRender(){
   const sb = getSupabaseClient();
   if(!sb) return;
+  await refreshIsAdmin(); // mantiene flag actualizado
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
+  // Vista del usuario: solo sus registros no eliminados
   const { data, error } = await sb
     .from('registros')
     .select('*')
@@ -297,15 +332,10 @@ form?.addEventListener('submit', async (e)=>{
     upZone?.focus?.();
     return;
   }
-
-  // Validar archivo por seguridad
-  if(!ALLOWED_MIME.includes(fileRef.type)){
-    showToast('Archivo no permitido.', 'error'); markUploaderError(true); return;
-  }
+  // Validar archivo
+  if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
   const sizeMB = fileRef.size/1024/1024;
-  if(sizeMB>MAX_FILE_MB){
-    showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return;
-  }
+  if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
 
   // Correlativo atómico
   const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
@@ -315,7 +345,7 @@ form?.addEventListener('submit', async (e)=>{
   const creditos = calcCreditos(horas);
   const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
-  // Subir archivo (OBLIGATORIO)
+  // Subir archivo
   let archivo_url = null, archivo_mime = null;
   {
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
@@ -353,36 +383,57 @@ form?.addEventListener('submit', async (e)=>{
 });
 
 /* =======================================================
-   Panel Admin (soft delete + búsqueda)
+   Panel Admin (cuenta admin + PIN)
 ======================================================= */
-function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
+function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); setupAdminEntry(); }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
 openAdminBtn?.addEventListener('click', openAdmin);
 closeAdmin?.addEventListener('click', closeAdminFn);
 window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
 
-let adminSessionEnd = 0;
-let currentAdminFilter = null;
+let currentAdminFilter = null; // correlativo o null
 
-function startAdminSession(){ adminSessionEnd = Date.now() + ADMIN_SESSION_MIN*60*1000; }
-function adminSessionValid(){ return Date.now() < adminSessionEnd; }
+async function setupAdminEntry(){
+  await refreshIsAdmin();
+  if(__IS_ADMIN){
+    // Si el usuario tiene rol admin en perfiles, entra directo
+    adminAuth.hidden = true;
+    adminBody.hidden = false;
+    adminBadge.textContent = 'Modo: Cuenta admin (perfiles.is_admin = true)';
+    await renderAdmin();
+  } else {
+    adminAuth.hidden = false;
+    adminBody.hidden = true;
+    adminBadge.textContent = 'Modo: PIN rápido (acceso limitado por RLS)';
+  }
+}
 
 adminLogin?.addEventListener('click', async (ev)=>{
   ev.preventDefault();
-  if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
-  if(adminAuth) adminAuth.hidden = true; if(adminBody) adminBody.hidden = false; startAdminSession();
-  currentAdminFilter = null;
+  if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('PIN incorrecto','error'); return; }
+  adminAuth.hidden = true; adminBody.hidden = false;
+  adminBadge.textContent = __IS_ADMIN ? 'Modo: Cuenta admin' : 'Modo: PIN (RLS activo)';
   await renderAdmin();
-  showToast('Sesión admin iniciada','ok');
+  showToast('Panel abierto.');
 });
+
+includeDeleted?.addEventListener('change', ()=> renderAdmin());
 
 async function renderAdmin(){
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   let q = sb.from('registros').select('*').order('created_at', { ascending:false });
+
+  // Si NO es admin con cuenta, RLS impedirá ver ajenos; con admin real verá todos
   if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+
+  if (!includeDeleted?.checked) {
+    q = q.is('deleted_at', null);
+  }
+
   const { data: rows, error } = await q;
-  if(error){ if(exportStatus) exportStatus.textContent='Error al cargar'; return; }
+  if(error){ if(exportStatus) exportStatus.textContent='Error al cargar'; console.error(error); return; }
   if(!adminTbody) return;
+
   adminTbody.innerHTML='';
   for(const r of rows){
     const estado = r.deleted_at ? 'Eliminado' : 'Activo';
@@ -412,12 +463,10 @@ async function renderAdmin(){
 
 // Buscar por correlativo
 adminSearchBtn?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error');
   currentAdminFilter = (adminSearch?.value||'').trim() || null;
   await renderAdmin();
 });
 adminClearSearch?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || !adminSessionValid()) return;
   currentAdminFilter = null; if(adminSearch) adminSearch.value=''; await renderAdmin();
 });
 adminSearch?.addEventListener('keydown', async (e)=>{
@@ -441,35 +490,27 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
 
   if(action==='del'){
     const corr = btn.getAttribute('data-corr') || '—';
-    const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}? Esta acción marcará el registro como eliminado y no será válido para verificación.`);
+    const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}? Quedará no válido para verificación.`);
     if(!ok) return;
     const { error: upErr } = await sb
       .from('registros')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id)
       .is('deleted_at', null);
-    if(upErr){ console.error(upErr); showToast('No se pudo eliminar (revisa que tu usuario sea admin).','error'); return; }
+    if(upErr){ console.error(upErr); showToast('No se pudo eliminar (puede ser RLS si no eres admin).','error'); return; }
     showToast('Registro marcado como eliminado.');
     await renderAdmin();
   }
 });
 
-// Sesión admin
-setInterval(()=>{
-  if(!adminBody?.hidden && Date.now() >= (window.__ADMIN_END || 0)){
-    showToast('Sesión admin expirada','warn');
-    if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value='';
-  }
-}, 2000);
-function startAdminSession(){ window.__ADMIN_END = Date.now() + ADMIN_SESSION_MIN*60*1000; }
-
-/* Exportar TODO (solo no eliminados) */
+/* Exportar CSV/XLSX: si es admin real, exporta todos; si no, solo visibles por RLS */
 exportCSVBtn?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
-  if(error){ showToast('Error al exportar (RLS)','error'); return; }
-  if(!rows?.length) return showToast('Sin registros','warn');
+  let q = sb.from('registros').select('*').order('created_at',{ascending:false});
+  if(!includeDeleted?.checked) q = q.is('deleted_at', null);
+  const { data: rows, error } = await q;
+  if(error){ showToast('Error al exportar (RLS)', 'error'); return; }
+  if(!rows?.length) return showToast('Sin registros', 'warn');
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(
     rows.map(o=> `"${headers.map(h=>String(o[h]??'').replace(/"/g,'""')).join('","')}"`)
@@ -482,10 +523,11 @@ exportCSVBtn?.addEventListener('click', async ()=>{
 });
 
 exportXLSXBtn?.addEventListener('click', async ()=>{
-  if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
-  if(error){ showToast('Error al exportar (RLS)','error'); return; }
+  let q = sb.from('registros').select('*').order('created_at',{ascending:false});
+  if(!includeDeleted?.checked) q = q.is('deleted_at', null);
+  const { data: rows, error } = await q;
+  if(error){ showToast('Error al exportar (RLS)', 'error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -558,7 +600,7 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR (derecha)
+  // QR
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -572,7 +614,7 @@ async function generarConstanciaPDF(rec){
     console.warn('QR no pudo generarse, se continúa sin QR:', err);
   }
 
-  // LOGO debajo del QR
+  // Logo debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
@@ -626,4 +668,4 @@ async function getQrDataUrl(text, size=96){
 /* =======================================================
    Carga inicial
 ======================================================= */
-loadAndRender();
+(async ()=>{ await refreshIsAdmin(); loadAndRender(); })();
