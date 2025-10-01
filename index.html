@@ -10,20 +10,28 @@
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
 
-  <!-- Libs -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- Supabase keys (mantengo tus valores) -->
   <script>
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
-  <!-- Usa v12 -->
+  <!-- Actualiza a v12 -->
   <script src="./script.js?v=12" defer></script>
+
+  <style>
+    /* estilos mínimos para la insignia */
+    .badge-admin {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:4px 8px; border-radius:999px; font-size:12px; font-weight:600;
+      background:#0ea5e9; color:#fff; border:1px solid #1f2937;
+    }
+    .badge-admin[hidden] { display:none !important; }
+  </style>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -34,6 +42,7 @@
       <h1>Registro de Créditos Académicos</h1>
     </div>
     <nav class="top-actions" style="display:flex; gap:8px; align-items:center">
+      <span id="adminBadge" class="badge-admin" hidden>✔ Eres administrador</span>
       <a class="btn" href="./verificar.html">Verificar constancia</a>
       <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
       <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
@@ -142,33 +151,25 @@
   <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
     <div class="modal-content" role="document">
       <header class="modal-header">
-        <h3 id="adminTitle">Panel de Administrador</h3>
+        <h3 id="adminTitle">Panel de Administrador <small id="adminRoleBadge" class="badge-admin" hidden style="margin-left:8px">✔ Eres administrador</small></h3>
         <button class="iconbtn" id="closeAdmin" type="button">✕</button>
       </header>
 
-      <!-- Si el usuario logueado es admin (perfiles.is_admin=true) este bloque se oculta automáticamente -->
       <div id="adminAuth">
-        <p>Ingrese <strong>PIN rápido</strong> del administrador (plan B):</p>
+        <p>Ingrese contraseña de administrador:</p>
         <input type="password" id="adminPass" placeholder="••••••" />
-        <div class="actions" style="gap:8px">
-          <button class="btn primary" id="adminLogin" type="button">Ingresar con PIN</button>
-          <span class="muted">Si tu cuenta es admin, el panel abrirá directo.</span>
+        <div class="actions">
+          <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
         </div>
+        <p id="adminGateNote" class="muted" style="margin-top:8px">Este panel requiere que su cuenta tenga privilegios de administrador.</p>
       </div>
 
       <div id="adminBody" hidden>
         <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-          <span id="adminBadge" class="muted">—</span>
-
           <input type="text" id="adminSearch" placeholder="Buscar correlativo (p.ej. CPG-202509-0001)" style="flex:1;min-width:260px" />
           <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
           <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
-
-          <label style="display:flex;align-items:center;gap:6px;margin-left:auto">
-            <input type="checkbox" id="includeDeleted" />
-            <span>Incluir eliminados</span>
-          </label>
-
+          <span class="muted" style="margin-left:auto">Exporta sin eliminados</span>
           <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
           <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
           <span class="muted" id="exportStatus">—</span>
@@ -199,6 +200,11 @@
           </table>
         </div>
       </div>
+
+      <div id="adminNoRights" class="card" hidden>
+        <p><strong>No tienes privilegios de administrador.</strong></p>
+        <p class="muted">Solicita acceso al responsable del sistema.</p>
+      </div>
     </div>
   </div>
 
@@ -216,10 +222,10 @@
         <label>Contraseña
           <input type="password" id="authPass" placeholder="********" autocomplete="current-password" />
         </label>
-        <div class="actions" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <div class="actions" style="margin-top:10px">
           <button class="btn primary" id="doLogin" type="button">Entrar</button>
           <button class="btn" id="doSignup" type="button">Crear cuenta</button>
-          <button class="btn warn" id="forgotPass" type="button">¿Olvidaste tu contraseña?</button>
+          <button class="btn" id="doRecover" type="button">¿Olvidaste tu contraseña?</button>
           <span class="muted" id="authState">—</span>
         </div>
       </div>
