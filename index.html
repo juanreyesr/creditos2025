@@ -6,55 +6,48 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
+  <!-- Evita que modales se muestren antes del CSS -->
   <style>.modal{display:none}</style>
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
 
-  <!-- Librerías -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
-
-  <!-- Credenciales Supabase -->
-  <script>
-    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
-    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
-  </script>
-
-  <!-- Script principal (v14) -->
-  <script src="./script.js?v=14" defer></script>
-
+  <!-- Estado de app / diagnósticos -->
   <style>
+    .app-status{position:fixed;top:8px;right:8px;z-index:9999;display:flex;gap:8px;flex-wrap:wrap}
+    .chip{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #334155;background:#0b1220;color:#e5e7eb}
+    .chip.ok{background:#065f46;border-color:#064e3b}
+    .chip.warn{background:#78350f;border-color:#92400e}
+    .chip.err{background:#7f1d1d;border-color:#991b1b}
+    .hidden{display:none!important}
     .badge-admin {
       display:inline-flex; align-items:center; gap:6px;
       padding:4px 8px; border-radius:999px; font-size:12px; font-weight:600;
       background:#0ea5e9; color:#fff; border:1px solid #1f2937;
     }
-    .badge-admin[hidden] { display:none !important; }
-
-    /* --- Auth Gate --- */
-    .auth-gate {
-      position:fixed; inset:0; background:rgba(2,6,23,.72);
-      backdrop-filter:saturate(140%) blur(4px);
-      display:none; align-items:center; justify-content:center; z-index:9990;
-    }
-    .auth-gate.show { display:flex; }
-    .gate-card {
-      background:var(--card, #0b1220); color:var(--text,#e5e7eb);
-      max-width:720px; width:92%; padding:20px; border-radius:16px;
-      box-shadow:0 10px 30px rgba(0,0,0,.35); border:1px solid rgba(148,163,184,.2);
-    }
-    .gate-card h2{ margin:0 0 8px;font-size:20px }
-    .gate-card p{ margin:0 0 12px; opacity:.9 }
-    .gate-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:8px }
-    .gate-actions .btn{ cursor:pointer }
+    .badge-admin[hidden]{display:none!important}
+    /* Auth Gate */
+    .auth-gate{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:saturate(140%) blur(4px);display:none;align-items:center;justify-content:center;z-index:9990}
+    .auth-gate.show{display:flex}
+    .gate-card{background:var(--card,#0b1220);color:var(--text,#e5e7eb);max-width:720px;width:92%;padding:20px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(148,163,184,.2)}
+    .gate-card h2{margin:0 0 8px;font-size:20px}
+    .gate-card p{margin:0 0 12px;opacity:.9}
+    .gate-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
   </style>
+
+  <!-- NOTA: cargamos nuestro script al final del <body> para asegurar DOM listo -->
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
 
-  <!-- Auth Gate (se muestra si no hay sesión) -->
+  <!-- Diagnóstico en vivo -->
+  <div class="app-status" aria-live="polite">
+    <span id="stSDK" class="chip warn">SDK: …</span>
+    <span id="stSB" class="chip warn">Supabase: …</span>
+    <span id="stAuth" class="chip warn">Auth: …</span>
+    <span id="stErr" class="chip err hidden">Error: —</span>
+  </div>
+
+  <!-- Auth Gate si no hay sesión -->
   <div id="authGate" class="auth-gate" aria-hidden="true" aria-labelledby="gateTitle" role="dialog">
     <div class="gate-card">
       <h2 id="gateTitle">Acceso requerido</h2>
@@ -266,10 +259,26 @@
     </div>
   </div>
 
+  <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <footer class="foot">
     <small>© 2025 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
   </footer>
+
+  <!-- SDKs externos (defer) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+  <script id="supabaseCdn" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
+
+  <!-- Credenciales Supabase -->
+  <script>
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
+  </script>
+
+  <!-- Script principal -->
+  <script src="./script.js?v=15"></script>
 </body>
 </html>
