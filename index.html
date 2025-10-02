@@ -10,20 +10,18 @@
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
 
-  <!-- libs -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
 
-  <!-- Supabase project keys -->
   <script>
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
 
-  <!-- Actualiza versión para evitar caché -->
-  <script src="./script.js?v=12" defer></script>
+  <!-- v13 -->
+  <script src="./script.js?v=13" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -142,7 +140,7 @@
     </section>
   </main>
 
-  <!-- MODAL ADMIN -->
+  <!-- MODAL ADMIN (con superadmin) -->
   <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
     <div class="modal-content" role="document">
       <header class="modal-header">
@@ -150,7 +148,6 @@
         <button class="iconbtn" id="closeAdmin" type="button">✕</button>
       </header>
 
-      <!-- Acceso clásico por PIN (permanece por compatibilidad) -->
       <div id="adminAuth">
         <p>Ingrese contraseña de administrador (PIN local):</p>
         <input type="password" id="adminPass" placeholder="••••••" />
@@ -158,9 +155,8 @@
           <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
         </div>
         <hr />
-        <!-- NUEVO: Superadmin con usuario/contraseña -->
         <h4 style="margin-top:8px">Entrar como superadmin</h4>
-        <p class="muted">Use un usuario de Supabase con permiso <code>is_admin</code>.</p>
+        <p class="muted">Necesita un usuario con <code>is_admin = true</code> en <code>public.perfiles</code>.</p>
         <label>Correo
           <input type="email" id="superEmail" placeholder="admin@dominio.com" />
         </label>
@@ -212,6 +208,9 @@
             <tbody></tbody>
           </table>
         </div>
+
+        <!-- Indicador diagnóstico -->
+        <div id="diagBox" class="muted" style="margin-top:8px; font-size:12px;"></div>
       </div>
     </div>
   </div>
