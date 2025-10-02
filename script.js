@@ -20,7 +20,7 @@ function getSupabaseClient() {
 /* =======================================================
    Config/Utils
 ======================================================= */
-const ADMIN_PASSWORD = "CAEDUC2025";  // PIN local opcional
+const ADMIN_PASSWORD = "CAEDUC2025";
 const ADMIN_SESSION_MIN = 15;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
@@ -35,7 +35,8 @@ const QR_SIZE = 96;
 const LOGO_BELOW_GAP = 12;
 
 let __PDF_LOGO_DATAURL = null;
-let __SUPERADMIN = false; // bandera de sesión superadmin
+let __SUPERADMIN = false;
+let __HAS_DELETED_AT = true; // se detecta al inicio
 
 function sanitize(str){
   return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
@@ -46,7 +47,7 @@ function showToast(msg, type="info"){
   el.textContent = msg;
   el.style.borderColor = type==="error"?"#f43f5e": type==="warn"?"#f59e0b":"#243055";
   el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'), 2800);
+  setTimeout(()=>el.classList.remove('show'), 3200);
 }
 function phoneValidGT(v){ return /^(?:\+?502)?\s?\d{8}$/.test(v.trim()); }
 function withinFiveYears(dateStr){
@@ -57,6 +58,7 @@ function withinFiveYears(dateStr){
 }
 function calcCreditos(h){ const n=Number(h); if(!isFinite(n)||n<=0) return 0; return Math.round((n/16)*100)/100; }
 function hashSimple(text){ let h=0; for(let i=0;i<text.length;i++){ h=(h<<5)-h + text.charCodeAt(i); h|=0; } return Math.abs(h).toString(36); }
+function sbErrMsg(err){ return err?.message || err?.hint || err?.code || 'Error desconocido'; }
 
 /* =======================================================
    DOM refs
@@ -95,8 +97,9 @@ const superEmail = document.getElementById('superEmail');
 const superPass = document.getElementById('superPass');
 const superLogin = document.getElementById('superLogin');
 const exportStatus = document.getElementById('exportStatus');
+const diagBox = document.getElementById('diagBox');
 
-// Auth modal (usuarios normales)
+// Auth modal
 const authBtn = document.getElementById('authBtn');
 const authModal = document.getElementById('authModal');
 const closeAuth = document.getElementById('closeAuth');
@@ -108,7 +111,7 @@ const doResetPassword = document.getElementById('doResetPassword');
 const authState = document.getElementById('authState');
 
 /* =======================================================
-   Inicialización UI + Auth
+   Inicialización UI + Feature flags
 ======================================================= */
 (function(){
   const now=new Date();
@@ -119,6 +122,23 @@ const authState = document.getElementById('authState');
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
+
+/* Detección: ¿existe deleted_at? */
+(async function detectDeletedAt(){
+  const sb = getSupabaseClient(); if(!sb) return;
+  try {
+    const { error } = await sb.from('registros').select('deleted_at').limit(1);
+    if (error) {
+      if (/(column|columna).*(deleted_at).*(does not exist|no existe)/i.test(sbErrMsg(error))) {
+        __HAS_DELETED_AT = false;
+        if (showDeleted) showDeleted.disabled = true;
+        if (diagBox) diagBox.textContent = 'Diagnóstico: la tabla public.registros no tiene la columna deleted_at. El sistema seguirá funcionando, pero te recomiendo ejecutar el SQL para agregarla.';
+      }
+    }
+  } catch {
+    // sin cambios
+  }
+})();
 
 /* ---------- Uploader obligatorio ---------- */
 function markUploaderError(on=true){
@@ -174,7 +194,7 @@ function handleFile(file){
   }
 }
 
-/* ---------- Auth UI (usuarios normales) ---------- */
+/* ---------- Auth UI ---------- */
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
@@ -189,7 +209,7 @@ authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click();
 doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
-  if(authState) authState.textContent = 'Creando cuenta...';
+  authState.textContent = 'Creando cuenta...';
 
   const email = (authEmail?.value||'').trim();
   const password = authPass?.value || '';
@@ -200,7 +220,7 @@ doSignup?.addEventListener('click', async ()=>{
     options: { emailRedirectTo: redirectTo }
   });
 
-  if(error){ authState.textContent='Error: '+error.message; return; }
+  if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
   authState.textContent='Revisa tu correo y verifica tu cuenta.';
 });
 
@@ -212,13 +232,13 @@ doLogin?.addEventListener('click', async ()=>{
     email: (authEmail?.value||'').trim(),
     password: authPass?.value || ''
   });
-  if(error){ authState.textContent='Error: '+error.message; return; }
+  if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
   authState.textContent='OK';
   closeModal(authModal);
   await loadAndRender();
 });
 
-/* ---- Reset de contraseña ---- */
+/* Reset de contraseña */
 doResetPassword?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   const email = (authEmail?.value||'').trim();
@@ -226,7 +246,7 @@ doResetPassword?.addEventListener('click', async ()=>{
   authState.textContent = 'Enviando correo de restablecimiento...';
   const redirectTo = `${location.origin}/auth-callback.html`;
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
-  if(error){ authState.textContent = 'Error: '+error.message; return; }
+  if(error){ authState.textContent = 'Error: '+sbErrMsg(error); return; }
   authState.textContent = 'Te enviamos un enlace para restablecer tu contraseña.';
 });
 
@@ -235,21 +255,24 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
 });
 
 /* =======================================================
-   Datos (Supabase) — Vista del usuario (mis registros)
+   Datos (vista usuario)
 ======================================================= */
 async function loadAndRender(){
   const sb = getSupabaseClient();
   if(!sb) return;
   const { data: session } = await sb.auth.getSession();
   if(!session?.session){ if(tablaBody) tablaBody.innerHTML=''; return; }
-  const { data, error } = await sb
-    .from('registros')
-    .select('*')
-    .eq('usuario_id', session.session.user.id)
-    .is('deleted_at', null)
-    .order('created_at', { ascending:false });
-  if(error){ console.error(error); showToast('No se pudieron cargar registros','error'); return; }
-  renderTabla(data);
+
+  let q = sb.from('registros').select('*').eq('usuario_id', session.session.user.id).order('created_at', { ascending:false });
+  if (__HAS_DELETED_AT) q = q.is('deleted_at', null);
+
+  const { data, error } = await q;
+  if(error){
+    console.error('loadAndRender error:', error);
+    showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error');
+    return;
+  }
+  renderTabla(data || []);
 }
 
 function renderTabla(rows){
@@ -274,12 +297,12 @@ tablaBody?.addEventListener('click', async (e)=>{
   const id = btn.getAttribute('data-id');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
-  if(error || !rows?.length) return showToast('Registro no disponible','error');
+  if(error || !rows?.length) return showToast('Registro no disponible: '+(error?sbErrMsg(error):'no encontrado'),'error');
   await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
 });
 
 /* =======================================================
-   Submit (insert + Storage) — Comprobante OBLIGATORIO
+   Submit
 ======================================================= */
 form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
@@ -291,7 +314,6 @@ form?.addEventListener('submit', async (e)=>{
   if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
   const user = s.session.user;
 
-  // Validaciones de campos
   const nombre = (form.nombre?.value||'').trim();
   const telefono = (form.telefono?.value||'').trim();
   const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
@@ -311,7 +333,6 @@ form?.addEventListener('submit', async (e)=>{
   if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
   if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
 
-  // *** Comprobante OBLIGATORIO ***
   if(!fileRef){
     showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error');
     markUploaderError(true);
@@ -320,30 +341,26 @@ form?.addEventListener('submit', async (e)=>{
     return;
   }
 
-  // Validar archivo
   if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
   const sizeMB = fileRef.size/1024/1024;
   if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
 
-  // Correlativo atómico
   const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
-  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo', 'error'); return; }
+  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo: '+(corrErr?sbErrMsg(corrErr):''), 'error'); return; }
   const correlativo = corrData;
 
   const creditos = calcCreditos(horas);
   const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
-  // Subir archivo
   let archivo_url = null, archivo_mime = null;
   {
     const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
     const path = `${user.id}/${correlativo}-${safeName}`;
     const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
-    if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
+    if(upErr){ showToast('No se pudo subir el archivo: '+sbErrMsg(upErr),'error'); return; }
     archivo_url = path; archivo_mime = fileRef.type;
   }
 
-  // Insert
   const payload = {
     usuario_id: user.id,
     correlativo,
@@ -355,9 +372,8 @@ form?.addEventListener('submit', async (e)=>{
   };
 
   const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
-  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro','error'); return; }
+  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
 
-  // PDF
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
 
@@ -371,7 +387,7 @@ form?.addEventListener('submit', async (e)=>{
 });
 
 /* =======================================================
-   Panel Admin: Modo PIN local vs Modo SUPERADMIN
+   Panel Admin: local vs superadmin
 ======================================================= */
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; __SUPERADMIN=false; updateAdminBadge(); }
@@ -392,23 +408,20 @@ adminLogin?.addEventListener('click', async (ev)=>{
   showToast('Sesión admin local iniciada','ok');
 });
 
-/* ---- Superadmin (correo/contraseña) ---- */
+/* Superadmin (correo/contraseña) */
 superLogin?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   adminState.textContent = 'Verificando...';
-  // Iniciar sesión (si no está)
   const email = (superEmail?.value||'').trim();
   const pass = (superPass?.value||'').trim();
   if(!email || !pass){ adminState.textContent = 'Escribe correo y contraseña'; return; }
 
-  // Intenta login (no cerramos sesión de usuario normal; esto usa la misma sesión)
   const { data: s } = await sb.auth.getSession();
   if(!s?.session){
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-    if(error){ adminState.textContent = 'Error: '+error.message; return; }
+    if(error){ adminState.textContent = 'Error: '+sbErrMsg(error); return; }
   }
 
-  // Consultar si el usuario es admin
   const { data: me } = await sb.auth.getUser();
   if(!me?.user){ adminState.textContent = 'No hay sesión activa'; return; }
 
@@ -423,23 +436,26 @@ superLogin?.addEventListener('click', async ()=>{
   showToast('Sesión superadmin iniciada','ok');
 });
 
-/* ---- Render en panel ---- */
+/* Render admin */
 async function renderAdmin(){
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   let q = sb.from('registros').select('*').order('created_at', { ascending:false });
-
-  // Filtro correlativo si aplica
   if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  if (__HAS_DELETED_AT) {
+    if (!showDeleted?.checked) q = q.is('deleted_at', null);
+  } else {
+    if (showDeleted) showDeleted.disabled = true;
+  }
 
-  // Mostrar eliminados o no
-  if (!showDeleted?.checked) q = q.is('deleted_at', null);
-
-  // Si NO eres superadmin, el RLS ya limitará a tus permisos (PIN local no afecta RLS)
-  // Si SÍ eres superadmin (is_admin=true en perfiles), las políticas RLS te dejan ver todo
   const { data: rows, error } = await q;
-  if(error){ exportStatus && (exportStatus.textContent='Error al cargar'); return; }
+  if(error){
+    exportStatus && (exportStatus.textContent='Error al cargar: '+sbErrMsg(error));
+    showToast('No se pudieron cargar registros: '+sbErrMsg(error), 'error');
+    if (diagBox) diagBox.textContent = 'Diagnóstico: ' + sbErrMsg(error);
+    return;
+  }
   adminTbody.innerHTML='';
-  for(const r of rows){
+  for(const r of rows || []){
     const estado = r.deleted_at ? 'Eliminado' : 'Activo';
     const tr=document.createElement('tr');
     tr.innerHTML=`
@@ -462,6 +478,10 @@ async function renderAdmin(){
         ${r.deleted_at ? '' : `<button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="del" type="button">Eliminar</button>`}
       </td>`;
     adminTbody.appendChild(tr);
+  }
+
+  if (diagBox) {
+    diagBox.textContent = `Diagnóstico: SB_URL ok, deleted_at=${__HAS_DELETED_AT ? 'sí' : 'no'}. Registros cargados: ${rows?.length||0}.`;
   }
 }
 
@@ -487,7 +507,7 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
 
   if(action==='pdf'){
     const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
-    if(error || !rows?.length) return showToast('Registro no disponible','error');
+    if(error || !rows?.length) return showToast('Registro no disponible: '+(error?sbErrMsg(error):'no encontrado'),'error');
     await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
   }
 
@@ -495,12 +515,9 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     const corr = btn.getAttribute('data-corr') || '—';
     const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}?`);
     if(!ok) return;
-    const { error: upErr } = await sb
-      .from('registros')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-      .is('deleted_at', null);
-    if(upErr){ console.error(upErr); showToast('No se pudo eliminar (RLS).','error'); return; }
+    const patch = __HAS_DELETED_AT ? { deleted_at: new Date().toISOString() } : { /* fallback: no deleted_at */ };
+    const { error: upErr } = await sb.from('registros').update(patch).eq('id', id);
+    if(upErr){ console.error(upErr); showToast('No se pudo eliminar (RLS): '+sbErrMsg(upErr),'error'); return; }
     showToast('Registro marcado como eliminado.');
     await renderAdmin();
   }
@@ -510,10 +527,10 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
 exportCSVBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   let q = sb.from('registros').select('*').order('created_at',{ascending:false});
-  if(!showDeleted?.checked) q = q.is('deleted_at', null);
+  if(__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
   if(currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
   const { data: rows, error } = await q;
-  if(error){ showToast('Error al exportar (RLS)','error'); return; }
+  if(error){ showToast('Error al exportar (RLS): '+sbErrMsg(error),'error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const headers = Object.keys(rows[0]);
   const csv = [headers.join(',')].concat(
@@ -529,10 +546,10 @@ exportCSVBtn?.addEventListener('click', async ()=>{
 exportXLSXBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   let q = sb.from('registros').select('*').order('created_at',{ascending:false});
-  if(!showDeleted?.checked) q = q.is('deleted_at', null);
+  if(__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
   if(currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
   const { data: rows, error } = await q;
-  if(error){ showToast('Error al exportar (RLS)','error'); return; }
+  if(error){ showToast('Error al exportar (RLS): '+sbErrMsg(error),'error'); return; }
   if(!rows?.length) return showToast('Sin registros','warn');
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -542,7 +559,7 @@ exportXLSXBtn?.addEventListener('click', async ()=>{
 });
 
 /* =======================================================
-   PDF + QR + LOGO (logo debajo del QR)
+   PDF + QR + LOGO
 ======================================================= */
 async function ensurePdfLogoDataUrl(){
   if (__PDF_LOGO_DATAURL !== null) return __PDF_LOGO_DATAURL;
@@ -605,7 +622,7 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR derecha
+  // QR
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -630,7 +647,6 @@ async function generarConstanciaPDF(rec){
     console.warn('No se pudo insertar logo en PDF:', e);
   }
 
-  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
