@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Diagnóstico Supabase</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script>
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
+  </script>
+</head>
+<body style="font-family:system-ui;max-width:800px;margin:24px auto">
+  <h1>Diagnóstico Supabase</h1>
+  <pre id="out" style="background:#0b1020;color:#d1e7ff;padding:12px;border-radius:8px;white-space:pre-wrap"></pre>
+  <script>
+    (async ()=>{
+      const log = (...a)=>{ out.textContent += a.join(' ') + '\n'; };
+      log('SB_URL:', window.SB_URL ? 'OK' : 'MISSING');
+      log('SB_KEY:', window.SB_KEY ? 'OK' : 'MISSING');
+
+      const sb = window.supabase.createClient(window.SB_URL, window.SB_KEY);
+      log('\n== Probar SELECT public.registros ==');
+      let r = await sb.from('registros').select('*').limit(1);
+      if(r.error) log('ERROR:', r.error.message); else log('OK, filas:', r.data.length);
+
+      log('\n== Probar columna deleted_at ==');
+      r = await sb.from('registros').select('deleted_at').limit(1);
+      log(r.error ? 'ERROR: '+r.error.message : 'OK (columna existe)');
+
+      log('\n== Probar RPC next_correlativo ==');
+      r = await sb.rpc('next_correlativo');
+      log(r.error ? 'ERROR: '+r.error.message : 'OK (funciona)');
+
+      log('\n== Probar RPC verify_constancia ==');
+      r = await sb.rpc('verify_constancia', { c: 'NOEXISTE', h: 'X' });
+      log(r.error ? 'ERROR: '+r.error.message : 'OK (existe, retorno '+(r.data?.length||0)+' filas)');
+
+      log('\n== Probar Storage bucket comprobantes (lista raíz anónima) ==');
+      // Nota: listar objetos puede estar bloqueado por RLS, esto es sólo a modo de prueba
+      try {
+        r = await sb.storage.from('comprobantes').list('', { limit: 1 });
+        log(r.error ? 'ERROR: '+r.error.message : 'OK (bucket existe)');
+      } catch (e) {
+        log('EXCEPTION:', e.message);
+      }
+
+      log('\n== Listo ==');
+    })();
+  </script>
+</body>
+</html>
