@@ -1,41 +1,40 @@
 /* ====== Chips de estado ====== */
-const stSDK = document.getElementById('stSDK');
-const stSB  = document.getElementById('stSB');
-const stAuth= document.getElementById('stAuth');
-const stErr = document.getElementById('stErr');
-function setChip(el, text, mode){ if(!el) return; el.textContent=text; el.classList.remove('ok','warn','err'); if(mode) el.classList.add(mode); if(el===stErr) el.classList.toggle('hidden', !text || text==='—'); }
+const stSDK=document.getElementById('stSDK');
+const stSB=document.getElementById('stSB');
+const stAuth=document.getElementById('stAuth');
+const stErr=document.getElementById('stErr');
+function setChip(el,t,mode){ if(!el)return; el.textContent=t; el.classList.remove('ok','warn','err'); if(mode) el.classList.add(mode); if(el===stErr) el.classList.toggle('hidden', !t||t==='—'); }
 
-/* ====== Errores globales ====== */
-window.addEventListener('error', e=>{ console.error(e?.error||e?.message); setChip(stErr,'JS: '+(e?.message||'error'),'err'); });
-window.addEventListener('unhandledrejection', e=>{ console.error(e?.reason); setChip(stErr,'Promise: '+(e?.reason?.message||'error'),'err'); });
+/* Global error handlers */
+window.addEventListener('error',e=>{ console.error(e?.error||e?.message); setChip(stErr,'JS: '+(e?.message||'error'),'err'); });
+window.addEventListener('unhandledrejection',e=>{ console.error(e?.reason); setChip(stErr,'Promise: '+(e?.reason?.message||'error'),'err'); });
 
-/* ====== Utils ====== */
-function showToast(msg, type="info"){ const el=document.getElementById('toast'); if(!el){ alert(msg); return; } el.textContent=msg; el.style.borderColor=type==="error"?"#f43f5e": type==="warn"?"#f59e0b":"#243055"; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'), 2800); }
-function sanitize(str){ return String(str||"").replace(/[&<>\"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+/* Utils */
+function showToast(msg,type="info"){ const el=document.getElementById('toast'); if(!el){ alert(msg); return; } el.textContent=msg; el.style.borderColor=type==="error"?"#f43f5e": type==="warn"?"#f59e0b":"#243055"; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }
+function sanitize(s){ return String(s||"").replace(/[&<>\"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
 function phoneValidGT(v){ return /^(?:\+?502)?\s?\d{8}$/.test(v.trim()); }
 function withinFiveYears(s){ const d=new Date(s), now=new Date(); if(isNaN(d)||d>now) return false; const past=new Date(); past.setFullYear(now.getFullYear()-5); return d>=past; }
 function calcCreditos(h){ const n=Number(h); if(!isFinite(n)||n<=0) return 0; return Math.round((n/16)*100)/100; }
 function hashSimple(t){ let h=0; for(let i=0;i<t.length;i++){ h=(h<<5)-h+t.charCodeAt(i); h|=0; } return Math.abs(h).toString(36); }
 
-/* ====== SDK Supabase robusto ====== */
+/* Supabase SDK */
 async function ensureSupabaseSDK(){
-  if (window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; }
+  if(window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; }
   for(let i=0;i<80;i++){ if(window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; } await new Promise(r=>setTimeout(r,25)); }
-  setChip(stSDK,'SDK: reintento…','warn');
-  await new Promise(res=>{ const s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js'; s.onload=res; s.onerror=res; document.head.appendChild(s); });
-  const ok=!!window.supabase?.createClient; setChip(stSDK, ok?'SDK: listo':'SDK: no cargó', ok?'ok':'err'); return ok;
+  setChip(stSDK,'SDK: no cargó','err'); return false;
 }
 function getSupabaseClient(){
   try{
     const url=window.SB_URL, key=window.SB_KEY;
     if(!url||!key){ setChip(stSB,'Credenciales faltan','err'); return null; }
-    if(!getSupabaseClient._c){ getSupabaseClient._c=window.supabase.createClient(url,key); }
-    setChip(stSB,'Cliente OK','ok'); return getSupabaseClient._c;
+    if(!getSupabaseClient._c) getSupabaseClient._c=window.supabase.createClient(url,key);
+    setChip(stSB,'Cliente OK','ok');
+    return getSupabaseClient._c;
   }catch(e){ console.error(e); setChip(stSB,'createClient error','err'); return null; }
 }
-async function pingSupabase(){ try{ const u=(window.SB_URL||'').replace(/\/+$/,'')+'/auth/v1/health'; const r=await fetch(u,{mode:'cors'}); if(!r.ok) throw new Error('HTTP '+r.status); setChip(stSB,'Supabase ON','ok'); }catch(e){ setChip(stSB,'Sin conexión a Supabase','err'); } }
+async function pingSupabase(){ try{ const u=(window.SB_URL||'').replace(/\/+$/,'')+'/auth/v1/health'; const r=await fetch(u,{mode:'cors'}); if(!r.ok) throw new Error('HTTP '+r.status); setChip(stSB,'Supabase ON','ok'); }catch{ setChip(stSB,'Sin conexión a Supabase','err'); }}
 
-/* ====== DOM ====== */
+/* DOM refs */
 const form=document.getElementById('registroForm');
 const horasEl=document.getElementById('horas');
 const creditosEl=document.getElementById('creditos');
@@ -87,7 +86,7 @@ const doSignup=document.getElementById('doSignup');
 const doRecover=document.getElementById('doRecover');
 const authState=document.getElementById('authState');
 
-/* ====== Estado ====== */
+/* Estado */
 const MAX_FILE_MB=10;
 const ALLOWED_MIME=["application/pdf","image/png","image/jpeg","image/jpg"];
 const ADMIN_PASSWORD="CAEDUC2025";
@@ -95,26 +94,25 @@ const ADMIN_SESSION_MIN=10;
 let __IS_ADMIN=false;
 let adminSessionEnd=0, currentAdminFilter=null;
 
-/* ====== UI helpers ====== */
+/* UI helpers */
 function toggleAuthGate(show){ if(!authGate) return; if(show){ authGate.classList.add('show'); authGate.setAttribute('aria-hidden','false'); } else { authGate.classList.remove('show'); authGate.setAttribute('aria-hidden','true'); } }
 function markUploaderError(on=true){ if(!upZone) return; upZone.style.transition='border-color .2s'; upZone.style.borderColor=on?'#f43f5e':'#334155'; }
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
-/* ====== Uploader ====== */
+/* Uploader */
 (function(){ const now=new Date(); fechaEl && (fechaEl.max=now.toISOString().slice(0,10)); horasEl?.addEventListener('input',()=> creditosEl.value=calcCreditos(horasEl.value)); browseBtn?.addEventListener('click',()=> fileInput?.click()); upZone?.addEventListener('click',e=>{ if(e.target?.id==='browseBtn') return; fileInput?.click(); }); ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#60a5fa'; })); ['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#334155'; if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null);} })); fileInput?.addEventListener('change',e=> handleFile(e.target.files?.[0]||null)); upZone?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput?.click(); } }); })();
 function handleFile(file){ if(!preview) return; preview.innerHTML=''; fileRef=null; if(!file){ markUploaderError(true); return; } if(!ALLOWED_MIME.includes(file.type)){ showToast('Tipo no permitido. Solo PDF/JPG/PNG.','error'); markUploaderError(true); return; } const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.','error'); markUploaderError(true); return; } fileRef=file; markUploaderError(false); if(file.type==='application/pdf'){ const url=URL.createObjectURL(file); const emb=document.createElement('embed'); emb.src=url; emb.type='application/pdf'; emb.className='pdf'; preview.appendChild(emb); } else { const img=document.createElement('img'); img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(file); preview.appendChild(img); } }
 
-/* ====== Boot ====== */
+/* Boot */
 (async function boot(){
   const okSDK=await ensureSupabaseSDK(); if(!okSDK){ showToast('No se pudo cargar el SDK de Supabase.','error'); return; }
   const sb=getSupabaseClient(); if(!sb){ showToast('Credenciales Supabase faltan o inválidas.','error'); return; }
   await pingSupabase();
 
   sb.auth.onAuthStateChange(async (_evt, session)=> updateAuthUI(session));
-
-  const { data: initial } = await sb.auth.getSession();
-  await updateAuthUI(initial?.session || null);
+  const { data: initial }=await sb.auth.getSession();
+  await updateAuthUI(initial?.session||null);
 })();
 
 async function updateAuthUI(session){
@@ -133,7 +131,7 @@ async function updateAuthUI(session){
   }
 }
 
-/* ====== Auth UI ====== */
+/* Auth UI */
 authBtn?.addEventListener('click',()=> openModal(authModal));
 logoutBtn?.addEventListener('click', async ()=>{ const sb=getSupabaseClient(); if(!sb) return; await sb.auth.signOut().catch(()=>{}); showToast('Sesión cerrada'); });
 
@@ -175,7 +173,7 @@ doRecover?.addEventListener('click', async ()=>{
   }catch(e){ showToast('Error: '+(e?.message||'no se pudo enviar el correo'),'error'); }
 });
 
-/* ====== Admin ====== */
+/* Admin */
 async function refreshAdminState(){
   const sb=getSupabaseClient(); if(!sb) return;
   const { data: s }=await sb.auth.getSession();
@@ -189,7 +187,6 @@ async function refreshAdminState(){
   adminRoleBadge && (adminRoleBadge.hidden=!__IS_ADMIN);
   adminGateNote && (adminGateNote.style.display = __IS_ADMIN ? 'none':'block');
 }
-
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); adminPass && (adminPass.value=''); }
 function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); adminBody && (adminBody.hidden=true); adminAuth && (adminAuth.hidden=false); adminPass && (adminPass.value=''); }
 openAdminBtn?.addEventListener('click', async ()=>{ const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; } const { data:s }=await sb.auth.getSession(); if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; } await refreshAdminState(); openAdmin(); if(!__IS_ADMIN){ adminBody.hidden=true; adminAuth.hidden=false; adminNoRights.hidden=false; } else { adminNoRights.hidden=true; } });
@@ -203,10 +200,8 @@ adminLogin?.addEventListener('click', async (ev)=>{
   if((adminPass?.value||'').trim()!==ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
   adminAuth.hidden=true; adminBody.hidden=false; startAdminSession(); currentAdminFilter=null; await renderAdmin(); showToast('Sesión admin iniciada','ok');
 });
-
 adminSearchBtn?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error'); currentAdminFilter=(adminSearch?.value||'').trim()||null; await renderAdmin(); });
 adminClearSearch?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return; currentAdminFilter=null; adminSearch.value=''; await renderAdmin(); });
-
 document.getElementById('adminTable')?.addEventListener('click', async e=>{
   const btn=e.target.closest('button[data-action]'); if(!btn) return;
   const action=btn.getAttribute('data-action'); const id=btn.getAttribute('data-id');
@@ -214,7 +209,6 @@ document.getElementById('adminTable')?.addEventListener('click', async e=>{
   if(action==='pdf'){ const { data: rows, error }=await sb.from('registros').select('*').eq('id',id).limit(1); if(error||!rows?.length) return showToast('Registro no disponible','error'); await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error')); }
   else if(action==='del'){ const corr=btn.getAttribute('data-corr')||'—'; const ok=confirm(`¿Eliminar (soft delete) el registro ${corr}?`); if(!ok) return; const { error: upErr }=await sb.from('registros').update({ deleted_at:new Date().toISOString() }).eq('id',id).is('deleted_at',null); if(upErr){ console.error(upErr); showToast('No se pudo eliminar (permisos/RLS).','error'); return; } showToast('Registro marcado como eliminado.'); await renderAdmin(); }
 });
-
 async function renderAdmin(){
   const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   let q=sb.from('registros').select('*').order('created_at',{ascending:false});
@@ -248,7 +242,7 @@ async function renderAdmin(){
   }
 }
 
-/* ====== Datos (listado personal) ====== */
+/* Datos (listado personal) */
 async function loadAndRender(){
   const sb=getSupabaseClient(); if(!sb) return;
   const { data: session }=await sb.auth.getSession();
@@ -263,7 +257,6 @@ async function loadAndRender(){
     if(error) throw error;
     renderTabla(data||[]);
   }catch(e){
-    // Fallback si la columna deleted_at no existe
     const { data, error } = await sb
       .from('registros')
       .select('*')
@@ -302,7 +295,7 @@ tablaBody?.addEventListener('click', async e=>{
   await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
 });
 
-/* ====== Submit registro ====== */
+/* Submit registro */
 form?.addEventListener('submit', async e=>{
   e.preventDefault();
   const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no está disponible.','error'); return; }
@@ -355,11 +348,24 @@ form?.addEventListener('submit', async e=>{
   loadAndRender();
 });
 
-/* ====== PDF (QR + logo) ====== */
+/* PDF (QR + logo) */
 const PDF_LOGO_URL='./assets/Logo-cpg.png';
 const PDF_LOGO_W=96, PDF_LOGO_H=96;
 const QR_X=450, QR_Y=64, QR_SIZE=96;
 async function getQrDataUrl(text,size=96){ if(typeof QRCode==='undefined') return null; return new Promise(res=>{ const tmp=document.createElement('div'); new QRCode(tmp,{text,width:size,height:size,correctLevel:QRCode.CorrectLevel.M}); const img=tmp.querySelector('img'); const canvas=tmp.querySelector('canvas'); if(canvas){ try{ return res(canvas.toDataURL('image/png')); }catch{ return res(null);} } if(img){ if(img.complete){ try{ return res(getBase64Image(img)); }catch{ return res(null);} } img.onload=()=>{ try{ res(getBase64Image(img)); }catch{ res(null);} }; img.onerror=()=>res(null); return; } res(null); }); }
 function getBase64Image(img){ const c=document.createElement('canvas'); c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height; c.getContext('2d').drawImage(img,0,0); return c.toDataURL('image/png'); }
 async function ensurePdfLogoDataUrl(){ return new Promise(resolve=>{ const img=new Image(); img.crossOrigin='anonymous'; img.onload=()=>{ try{ const c=document.createElement('canvas'); c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height; c.getContext('2d').drawImage(img,0,0); resolve(c.toDataURL('image/png')); }catch{ resolve(null);} }; img.onerror=()=>resolve(null); img.src=PDF_LOGO_URL+(PDF_LOGO_URL.includes('?')?'&':'?')+'v='+Date.now(); }); }
-async function generarConstanciaPDF(rec){ if(!window.jspdf?.jsPDF){ showToast('jsPDF no cargó.','error'); throw new Error('jsPDF missing'); } const { jsPDF }=window.jspdf; const doc=new jsPDF({ unit:'pt', format:'a4' }); const pad=48; doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text('Constancia de Registro de Créditos Académicos', pad, 64); doc.setFontSize(11); doc.setFont('helvetica','normal'); doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84); doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.text(`No. ${rec.correlativo}`, pad, 112); doc.setFont('helvetica','normal'); doc.setFontSize(12); const lines=[`Nombre: ${rec.nombre}`,`Teléfono: ${rec.telefono}`,`Colegiado No.: ${(rec.colegiado_numero??rec.colegiadoNumero)||'—'} (Activo: ${(rec.colegiado_activo??rec.colegiadoActivo)||'—'})`,`Actividad: ${rec.actividad}`,`Institución: ${rec.institucion}`,`Tipo: ${rec.tipo}`,`Fecha: ${rec.fecha}`,`Horas: ${rec.horas}`,`Créditos (16h = 1): ${rec.creditos}`,]; let y=140; const lineH=18; for(const ln of lines){ doc.text(String(ln), pad, y); y+=lineH; } if(rec.observaciones){ doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y+=lineH; } try{ const verifyUrl=`${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`; const qrDataUrl=await getQrDataUrl(verifyUrl, QR_SIZE); if(qrDataUrl){ doc.addImage(qrDataUrl,'PNG',QR_X,QR_Y,QR_SIZE,QR_SIZE); doc.setFontSize(10); doc.setTextColor(120); doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790); doc.text(verifyUrl, pad, 805, { maxWidth: 500 }); } }catch{} try{ const logo=await ensurePdfLogoDataUrl(); if(logo){ const logoY=QR_Y+QR_SIZE+12; doc.addImage(logo,'PNG',QR_X,logoY,PDF_LOGO_W,PDF_LOGO_H); } }catch{} doc.setFontSize(10); doc.setTextColor(120); if(rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820); doc.save(`Constancia_${rec.correlativo}.pdf`); }
+async function generarConstanciaPDF(rec){
+  if(!window.jspdf?.jsPDF){ showToast('jsPDF no cargó.','error'); throw new Error('jsPDF missing'); }
+  const { jsPDF }=window.jspdf; const doc=new jsPDF({ unit:'pt', format:'a4' }); const pad=48;
+  doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
+  doc.setFontSize(11); doc.setFont('helvetica','normal'); doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 84);
+  doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.text(`No. ${rec.correlativo}`, pad, 112);
+  doc.setFont('helvetica','normal'); doc.setFontSize(12);
+  const lines=[`Nombre: ${rec.nombre}`,`Teléfono: ${rec.telefono}`,`Colegiado No.: ${(rec.colegiado_numero??rec.colegiadoNumero)||'—'} (Activo: ${(rec.colegiado_activo??rec.colegiadoActivo)||'—'})`,`Actividad: ${rec.actividad}`,`Institución: ${rec.institucion}`,`Tipo: ${rec.tipo}`,`Fecha: ${rec.fecha}`,`Horas: ${rec.horas}`,`Créditos (16h = 1): ${rec.creditos}`,];
+  let y=140; const lineH=18; for(const ln of lines){ doc.text(String(ln), pad, y); y+=lineH; } if(rec.observaciones){ doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y+=lineH; }
+  try{ const verifyUrl=`${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`; const qrDataUrl=await getQrDataUrl(verifyUrl, QR_SIZE); if(qrDataUrl){ doc.addImage(qrDataUrl,'PNG',QR_X,QR_Y,QR_SIZE,QR_SIZE); doc.setFontSize(10); doc.setTextColor(120); doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790); doc.text(verifyUrl, pad, 805, { maxWidth: 500 }); } }catch{}
+  try{ const logo=await ensurePdfLogoDataUrl(); if(logo){ const logoY=QR_Y+QR_SIZE+12; doc.addImage(logo,'PNG',QR_X,logoY,PDF_LOGO_W,PDF_LOGO_H); } }catch{}
+  doc.setFontSize(10); doc.setTextColor(120); if(rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
+  doc.save(`Constancia_${rec.correlativo}.pdf`);
+}
