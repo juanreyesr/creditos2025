@@ -32,7 +32,7 @@ function getSupabaseClient(){
     return getSupabaseClient._c;
   }catch(e){ console.error(e); setChip(stSB,'createClient error','err'); return null; }
 }
-async function pingSupabase(){ try{ const u=(window.SB_URL||'').replace(/\/+$/,'')+'/auth/v1/health'; const r=await fetch(u,{mode:'cors'}); if(!r.ok) throw new Error('HTTP '+r.status); setChip(stSB,'Supabase ON','ok'); }catch{ setChip(stSB,'Sin conexión a Supabase','err'); }}
+async function pingSupabase(){ try{ const u=(window.SB_URL||'').replace(/\/+$/,'')+'/auth/v1/health'; const r=await fetch(u,{mode:'cors'}); if(!r.ok) throw new Error('HTTP '+r.status); setChip(stSB,'Supabase ON','ok'); }catch{ setChip(stSB,'Sin conexión a Supabase','warn'); }}
 
 /* DOM refs */
 const form=document.getElementById('registroForm');
@@ -97,8 +97,8 @@ let adminSessionEnd=0, currentAdminFilter=null;
 /* UI helpers */
 function toggleAuthGate(show){ if(!authGate) return; if(show){ authGate.classList.add('show'); authGate.setAttribute('aria-hidden','false'); } else { authGate.classList.remove('show'); authGate.setAttribute('aria-hidden','true'); } }
 function markUploaderError(on=true){ if(!upZone) return; upZone.style.transition='border-color .2s'; upZone.style.borderColor=on?'#f43f5e':'#334155'; }
-function openModal(m){ m?.setAttribute('aria-hidden','false'); }
-function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
+function openModal(m){ if(!m) return; m.setAttribute('aria-hidden','false'); if(getComputedStyle(m).display==='none'){ m.style.display='block'; } }
+function closeModal(m){ if(!m) return; m.setAttribute('aria-hidden','true'); if(getComputedStyle(m).display!=='none'){ m.style.display='none'; } if(authState) authState.textContent='—'; }
 
 /* Uploader */
 (function(){ const now=new Date(); fechaEl && (fechaEl.max=now.toISOString().slice(0,10)); horasEl?.addEventListener('input',()=> creditosEl.value=calcCreditos(horasEl.value)); browseBtn?.addEventListener('click',()=> fileInput?.click()); upZone?.addEventListener('click',e=>{ if(e.target?.id==='browseBtn') return; fileInput?.click(); }); ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#60a5fa'; })); ['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#334155'; if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null);} })); fileInput?.addEventListener('change',e=> handleFile(e.target.files?.[0]||null)); upZone?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput?.click(); } }); })();
@@ -126,6 +126,7 @@ async function updateAuthUI(session){
     await refreshAdminState();
     await loadAndRender();
   } else {
+    // Abrimos el modal la primera vez automáticamente
     if (!document.body.__authOpenedOnce){ document.body.__authOpenedOnce=true; openModal(authModal); }
     adminBadgeTop.hidden=true;
   }
@@ -174,6 +175,7 @@ doRecover?.addEventListener('click', async ()=>{
 });
 
 /* Admin */
+let __IS_ADMIN=false;
 async function refreshAdminState(){
   const sb=getSupabaseClient(); if(!sb) return;
   const { data: s }=await sb.auth.getSession();
@@ -187,9 +189,17 @@ async function refreshAdminState(){
   adminRoleBadge && (adminRoleBadge.hidden=!__IS_ADMIN);
   adminGateNote && (adminGateNote.style.display = __IS_ADMIN ? 'none':'block');
 }
-function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); adminPass && (adminPass.value=''); }
-function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); adminBody && (adminBody.hidden=true); adminAuth && (adminAuth.hidden=false); adminPass && (adminPass.value=''); }
-openAdminBtn?.addEventListener('click', async ()=>{ const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; } const { data:s }=await sb.auth.getSession(); if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; } await refreshAdminState(); openAdmin(); if(!__IS_ADMIN){ adminBody.hidden=true; adminAuth.hidden=false; adminNoRights.hidden=false; } else { adminNoRights.hidden=true; } });
+function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(getComputedStyle(adminModal).display==='none'){ adminModal.style.display='block'; } adminPass && (adminPass.value=''); }
+function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); adminModal && (adminModal.style.display='none'); adminBody && (adminBody.hidden=true); adminAuth && (adminAuth.hidden=false); adminPass && (adminPass.value=''); }
+const adminModalEl=document.getElementById('adminModal');
+document.getElementById('openAdminBtn')?.addEventListener('click', async ()=>{
+  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const { data:s }=await sb.auth.getSession();
+  if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; }
+  await refreshAdminState();
+  openAdmin();
+  if(!__IS_ADMIN){ adminBody.hidden=true; adminAuth.hidden=false; adminNoRights.hidden=false; } else { adminNoRights.hidden=true; }
+});
 closeAdmin?.addEventListener('click', closeAdminFn);
 function startAdminSession(){ adminSessionEnd=Date.now()+ADMIN_SESSION_MIN*60*1000; }
 function adminSessionValid(){ return Date.now()<adminSessionEnd; }
