@@ -1,3 +1,6 @@
+// === bandera para comprobar que la app cargó ===
+window.__APP_READY__ = true;
+
 /* ====== Chips de estado ====== */
 const stSDK=document.getElementById('stSDK');
 const stSB=document.getElementById('stSB');
@@ -20,7 +23,10 @@ function hashSimple(t){ let h=0; for(let i=0;i<t.length;i++){ h=(h<<5)-h+t.charC
 /* Supabase SDK */
 async function ensureSupabaseSDK(){
   if(window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; }
-  for(let i=0;i<80;i++){ if(window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; } await new Promise(r=>setTimeout(r,25)); }
+  for(let i=0;i<120;i++){ // hasta ~3s
+    if(window.supabase?.createClient){ setChip(stSDK,'SDK: listo','ok'); return true; }
+    await new Promise(r=>setTimeout(r,25));
+  }
   setChip(stSDK,'SDK: no cargó','err'); return false;
 }
 function getSupabaseClient(){
@@ -95,89 +101,205 @@ let __IS_ADMIN=false;
 let adminSessionEnd=0, currentAdminFilter=null;
 
 /* UI helpers */
-function toggleAuthGate(show){ if(!authGate) return; if(show){ authGate.classList.add('show'); authGate.setAttribute('aria-hidden','false'); } else { authGate.classList.remove('show'); authGate.setAttribute('aria-hidden','true'); } }
+function toggleAuthGate(show){ if(!authGate) return; if(show){ authGate.setAttribute('aria-hidden','false'); authGate.style.display='flex'; } else { authGate.setAttribute('aria-hidden','true'); authGate.style.display='none'; } }
 function markUploaderError(on=true){ if(!upZone) return; upZone.style.transition='border-color .2s'; upZone.style.borderColor=on?'#f43f5e':'#334155'; }
 function openModal(m){ if(!m) return; m.setAttribute('aria-hidden','false'); if(getComputedStyle(m).display==='none'){ m.style.display='block'; } }
 function closeModal(m){ if(!m) return; m.setAttribute('aria-hidden','true'); if(getComputedStyle(m).display!=='none'){ m.style.display='none'; } if(authState) authState.textContent='—'; }
 
-/* Uploader */
-(function(){ const now=new Date(); fechaEl && (fechaEl.max=now.toISOString().slice(0,10)); horasEl?.addEventListener('input',()=> creditosEl.value=calcCreditos(horasEl.value)); browseBtn?.addEventListener('click',()=> fileInput?.click()); upZone?.addEventListener('click',e=>{ if(e.target?.id==='browseBtn') return; fileInput?.click(); }); ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#60a5fa'; })); ['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#334155'; if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null);} })); fileInput?.addEventListener('change',e=> handleFile(e.target.files?.[0]||null)); upZone?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput?.click(); } }); })();
+/* Uploader y campos */
+function initFormUI(){
+  const now=new Date(); fechaEl && (fechaEl.max=now.toISOString().slice(0,10));
+  horasEl?.addEventListener('input',()=> creditosEl.value=calcCreditos(horasEl.value));
+  browseBtn?.addEventListener('click',()=> fileInput?.click());
+  upZone?.addEventListener('click',e=>{ if(e.target?.id==='browseBtn') return; fileInput?.click(); });
+  ['dragenter','dragover'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#60a5fa'; }));
+  ['dragleave','drop'].forEach(ev=> upZone?.addEventListener(ev,e=>{ e.preventDefault(); upZone.style.borderColor='#334155'; if(ev==='drop'){ handleFile(e.dataTransfer.files?.[0]||null);} }));
+  fileInput?.addEventListener('change',e=> handleFile(e.target.files?.[0]||null));
+  upZone?.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput?.click(); } });
+}
 function handleFile(file){ if(!preview) return; preview.innerHTML=''; fileRef=null; if(!file){ markUploaderError(true); return; } if(!ALLOWED_MIME.includes(file.type)){ showToast('Tipo no permitido. Solo PDF/JPG/PNG.','error'); markUploaderError(true); return; } const mb=file.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.','error'); markUploaderError(true); return; } fileRef=file; markUploaderError(false); if(file.type==='application/pdf'){ const url=URL.createObjectURL(file); const emb=document.createElement('embed'); emb.src=url; emb.type='application/pdf'; emb.className='pdf'; preview.appendChild(emb); } else { const img=document.createElement('img'); img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(file); preview.appendChild(img); } }
 
-/* Boot */
-(async function boot(){
+/* Boot secuenciado */
+async function boot(){
+  initFormUI();
   const okSDK=await ensureSupabaseSDK(); if(!okSDK){ showToast('No se pudo cargar el SDK de Supabase.','error'); return; }
   const sb=getSupabaseClient(); if(!sb){ showToast('Credenciales Supabase faltan o inválidas.','error'); return; }
   await pingSupabase();
 
+  // botones del gate abren el modal
+  [document.getElementById('gateLogin'), document.getElementById('gateSignup'), document.getElementById('gateRecover')]
+    .forEach(btn=> btn?.addEventListener('click',()=> openModal(authModal)));
+
+  // Auth listeners
   sb.auth.onAuthStateChange(async (_evt, session)=> updateAuthUI(session));
   const { data: initial }=await sb.auth.getSession();
   await updateAuthUI(initial?.session||null);
-})();
 
+  // UI de auth
+  authBtn?.addEventListener('click',()=> openModal(authModal));
+  closeAuth?.addEventListener('click',()=> closeModal(authModal));
+  logoutBtn?.addEventListener('click', async ()=>{ await sb.auth.signOut().catch(()=>{}); showToast('Sesión cerrada'); });
+
+  doSignup?.addEventListener('click', async ()=>{
+    authState.textContent='Creando cuenta...';
+    try{
+      const email=(authEmail?.value||'').trim(); const password=authPass?.value||''; const redirectTo=`${location.origin}/auth-callback.html`;
+      const { error }=await sb.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo } });
+      if(error) throw error;
+      authState.textContent='Correo enviado para verificar tu cuenta.';
+    }catch(e){ authState.textContent='Error: '+(e?.message||'no se pudo registrar'); }
+  });
+
+  doLogin?.addEventListener('click', async ()=>{
+    authState.textContent='Ingresando...';
+    try{
+      const { data, error }=await sb.auth.signInWithPassword({ email:(authEmail?.value||'').trim(), password:authPass?.value||'' });
+      if(error) throw error;
+      if(!data?.session) throw new Error('Sin sesión');
+      authState.textContent='OK';
+      closeModal(authModal); toggleAuthGate(false);
+    }catch(e){ authState.textContent='Error: '+(e?.message||'no se pudo iniciar sesión'); }
+  });
+  document.getElementById('doRecover')?.addEventListener('click', async ()=>{
+    const email=(authEmail?.value||'').trim(); if(!email){ showToast('Ingresa tu email y pulsa recuperar.','warn'); return; }
+    try{
+      const redirectTo=`${location.origin}/auth-callback.html`;
+      const { error }=await sb.auth.resetPasswordForEmail(email,{ redirectTo });
+      if(error) throw error;
+      showToast('Te enviamos un correo para restablecer la contraseña.');
+    }catch(e){ showToast('Error: '+(e?.message||'no se pudo enviar el correo'),'error'); }
+  });
+
+  // Admin
+  document.getElementById('openAdminBtn')?.addEventListener('click', async ()=>{
+    const { data:s }=await sb.auth.getSession();
+    if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; }
+    await refreshAdminState(sb);
+    openAdmin();
+    if(!__IS_ADMIN){ adminBody.hidden=true; adminAuth.hidden=false; adminNoRights.hidden=false; } else { adminNoRights.hidden=true; }
+  });
+  closeAdmin?.addEventListener('click', closeAdminFn);
+  adminLogin?.addEventListener('click', async (ev)=>{
+    ev.preventDefault();
+    if(!__IS_ADMIN){ showToast('Tu cuenta no tiene privilegios de administrador.','error'); return; }
+    if((adminPass?.value||'').trim()!==ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
+    adminAuth.hidden=true; adminBody.hidden=false; startAdminSession(); currentAdminFilter=null; await renderAdmin(sb); showToast('Sesión admin iniciada','ok');
+  });
+  adminSearchBtn?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error'); currentAdminFilter=(adminSearch?.value||'').trim()||null; await renderAdmin(sb); });
+  adminClearSearch?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return; currentAdminFilter=null; adminSearch.value=''; await renderAdmin(sb); });
+  document.getElementById('adminTable')?.addEventListener('click', async e=>{
+    const btn=e.target.closest('button[data-action]'); if(!btn) return;
+    const action=btn.getAttribute('data-action'); const id=btn.getAttribute('data-id');
+    if(action==='pdf'){ const { data: rows, error }=await sb.from('registros').select('*').eq('id',id).limit(1); if(error||!rows?.length) return showToast('Registro no disponible','error'); await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error')); }
+    else if(action==='del'){ const corr=btn.getAttribute('data-corr')||'—'; const ok=confirm(`¿Eliminar (soft delete) el registro ${corr}?`); if(!ok) return; const { error: upErr }=await sb.from('registros').update({ deleted_at:new Date().toISOString() }).eq('id',id).is('deleted_at',null); if(upErr){ console.error(upErr); showToast('No se pudo eliminar (permisos/RLS).','error'); return; } showToast('Registro marcado como eliminado.'); await renderAdmin(sb); }
+  });
+
+  exportCSVBtn?.addEventListener('click', async ()=>{
+    if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
+    const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
+    if(error){ showToast('Error al exportar (RLS)','error'); return; }
+    if(!rows?.length) return showToast('Sin registros','warn');
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.join(',')].concat(rows.map(o=> `"${headers.map(h=>String(o[h]??'').replace(/"/g,'""')).join('","')}"`)).join('\n');
+    const blob = new Blob(["\ufeff"+csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=`registros_cpg_${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    if(exportStatus) exportStatus.textContent='CSV descargado';
+  });
+  exportXLSXBtn?.addEventListener('click', async ()=>{
+    if(adminBody?.hidden || Date.now() >= (window.__ADMIN_END||0)) return showToast('Inicie sesión admin','error');
+    const { data: rows, error } = await sb.from('registros').select('*').is('deleted_at', null).order('created_at',{ascending:false});
+    if(error){ showToast('Error al exportar (RLS)','error'); return; }
+    if(!rows?.length) return showToast('Sin registros','warn');
+    const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Registros'); XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
+    if(exportStatus) exportStatus.textContent='Excel descargado';
+  });
+
+  // Submit registro
+  form?.addEventListener('submit', async e=>{
+    e.preventDefault();
+    const { data: s }=await sb.auth.getSession();
+    if(!s?.session){ showToast('Inicia sesión para registrar.','error'); return; }
+    const user=s.session.user;
+
+    const nombre=(form.nombre?.value||'').trim();
+    const telefono=(form.telefono?.value||'').trim();
+    const colegiadoNumero=(form.colegiadoNumero?.value||'').trim();
+    const colegiadoActivo=form.colegiadoActivo?.value;
+    const actividad=(form.actividad?.value||'').trim();
+    const institucion=(form.institucion?.value||'').trim();
+    const tipo=form.tipo?.value;
+    const fecha=form.fecha?.value;
+    const horas=Number(form.horas?.value);
+    const observaciones=(obsEl?.value||'').trim();
+
+    if(!nombre||!telefono||!colegiadoNumero||!colegiadoActivo||!actividad||!institucion||!tipo||!fecha||!horas){ showToast('Complete todos los campos obligatorios (*).','error'); return; }
+    if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)','error'); return; }
+    if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)','error'); return; }
+    if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).','error'); return; }
+    if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.','error'); return; }
+    if(!fileRef){ showToast('Adjunte el comprobante (PDF/JPG/PNG).','error'); markUploaderError(true); upZone?.focus?.(); return; }
+    const mb=fileRef.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.','error'); return; }
+
+    const { data: corrData, error: corrErr }=await sb.rpc('next_correlativo');
+    if(corrErr||!corrData){ showToast('No se pudo obtener correlativo','error'); return; }
+    const correlativo=corrData;
+
+    const creditos=calcCreditos(horas);
+    const hash=hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
+
+    let archivo_url=null, archivo_mime=null;
+    {
+      const safeName=fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+      const path=`${user.id}/${correlativo}-${safeName}`;
+      const { error: upErr }=await sb.storage.from('comprobantes').upload(path,fileRef,{ contentType:fileRef.type, upsert:false });
+      if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
+      archivo_url=path; archivo_mime=fileRef.type;
+    }
+
+    const payload={ usuario_id:user.id, correlativo, nombre, telefono, colegiado_numero:colegiadoNumero, colegiado_activo:colegiadoActivo, actividad, institucion, tipo, fecha, horas, creditos, observaciones, archivo_url, archivo_mime, hash };
+    const { data: inserted, error: insErr }=await sb.from('registros').insert(payload).select().single();
+    if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+(insErr?.message||''),'error'); return; }
+
+    await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
+    showToast('Registro guardado y constancia generada.');
+    form.reset(); preview.innerHTML=''; creditosEl.value=''; fileRef=null; markUploaderError(false);
+    loadAndRender(sb);
+  });
+
+  // Tabla (PDF)
+  tablaBody?.addEventListener('click', async e=>{
+    const btn=e.target.closest('button[data-action="pdf"]'); if(!btn) return;
+    const id=btn.getAttribute('data-id');
+    const { data: rows, error }=await sb.from('registros').select('*').eq('id',id).limit(1);
+    if(error||!rows?.length) return showToast('Registro no disponible','error');
+    await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+  });
+}
+
+// Arranque cuando el DOM está listo
+window.addEventListener('DOMContentLoaded', boot);
+
+/* Auth/UI auxiliares */
 async function updateAuthUI(session){
   const hasUser=!!session?.user;
   setChip(stAuth, hasUser ? 'Auth: con sesión' : 'Auth: sin sesión', hasUser ? 'ok':'warn');
-  authBtn.style.display = hasUser ? 'none':'inline-block';
-  logoutBtn.style.display = hasUser ? 'inline-block':'none';
+  const authBtn=document.getElementById('authBtn');
+  const logoutBtn=document.getElementById('logoutBtn');
+  if(authBtn) authBtn.style.display = hasUser ? 'none':'inline-block';
+  if(logoutBtn) logoutBtn.style.display = hasUser ? 'inline-block':'none';
   toggleAuthGate(!hasUser);
 
   if (hasUser){
-    await refreshAdminState();
-    await loadAndRender();
+    const sb=getSupabaseClient(); await refreshAdminState(sb); await loadAndRender(sb);
   } else {
-    // Abrimos el modal la primera vez automáticamente
+    const authModal=document.getElementById('authModal');
     if (!document.body.__authOpenedOnce){ document.body.__authOpenedOnce=true; openModal(authModal); }
-    adminBadgeTop.hidden=true;
+    const adminBadgeTop=document.getElementById('adminBadge');
+    if(adminBadgeTop) adminBadgeTop.hidden=true;
   }
 }
-
-/* Auth UI */
-authBtn?.addEventListener('click',()=> openModal(authModal));
-logoutBtn?.addEventListener('click', async ()=>{ const sb=getSupabaseClient(); if(!sb) return; await sb.auth.signOut().catch(()=>{}); showToast('Sesión cerrada'); });
-
-closeAuth?.addEventListener('click',()=> closeModal(authModal));
-[gateLogin, gateSignup, gateRecover].forEach(btn=> btn?.addEventListener('click',()=> openModal(authModal)));
-authPass?.addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin?.click(); });
-
-doSignup?.addEventListener('click', async ()=>{
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  authState.textContent='Creando cuenta...';
-  try{
-    const email=(authEmail?.value||'').trim(); const password=authPass?.value||''; const redirectTo=`${location.origin}/auth-callback.html`;
-    const { error }=await sb.auth.signUp({ email, password, options:{ emailRedirectTo:redirectTo } });
-    if(error) throw error;
-    authState.textContent='Correo enviado para verificar tu cuenta.';
-  }catch(e){ authState.textContent='Error: '+(e?.message||'no se pudo registrar'); }
-});
-
-doLogin?.addEventListener('click', async ()=>{
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  authState.textContent='Ingresando...';
-  try{
-    const { data, error }=await sb.auth.signInWithPassword({ email:(authEmail?.value||'').trim(), password:authPass?.value||'' });
-    if(error) throw error;
-    if(!data?.session) throw new Error('Sin sesión');
-    authState.textContent='OK';
-    closeModal(authModal); toggleAuthGate(false);
-  }catch(e){ authState.textContent='Error: '+(e?.message||'no se pudo iniciar sesión'); }
-});
-
-doRecover?.addEventListener('click', async ()=>{
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const email=(authEmail?.value||'').trim(); if(!email){ showToast('Ingresa tu email y pulsa recuperar.','warn'); return; }
-  try{
-    const redirectTo=`${location.origin}/auth-callback.html`;
-    const { error }=await sb.auth.resetPasswordForEmail(email,{ redirectTo });
-    if(error) throw error;
-    showToast('Te enviamos un correo para restablecer la contraseña.');
-  }catch(e){ showToast('Error: '+(e?.message||'no se pudo enviar el correo'),'error'); }
-});
-
-/* Admin */
-let __IS_ADMIN=false;
-async function refreshAdminState(){
-  const sb=getSupabaseClient(); if(!sb) return;
+async function refreshAdminState(sb){
+  if(!sb) return;
   const { data: s }=await sb.auth.getSession();
   let isAdmin=false;
   if(s?.session?.user?.id){
@@ -185,46 +307,24 @@ async function refreshAdminState(){
     if(!error && data && data.is_admin===true) isAdmin=true;
   }
   __IS_ADMIN=isAdmin;
-  adminBadgeTop.hidden=!__IS_ADMIN;
-  adminRoleBadge && (adminRoleBadge.hidden=!__IS_ADMIN);
-  adminGateNote && (adminGateNote.style.display = __IS_ADMIN ? 'none':'block');
+  const adminBadgeTop=document.getElementById('adminBadge');
+  const adminRoleBadge=document.getElementById('adminRoleBadge');
+  const adminGateNote=document.getElementById('adminGateNote');
+  if(adminBadgeTop) adminBadgeTop.hidden=!__IS_ADMIN;
+  if(adminRoleBadge) adminRoleBadge.hidden=!__IS_ADMIN;
+  if(adminGateNote) adminGateNote.style.display = __IS_ADMIN ? 'none':'block';
 }
-function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(getComputedStyle(adminModal).display==='none'){ adminModal.style.display='block'; } adminPass && (adminPass.value=''); }
-function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); adminModal && (adminModal.style.display='none'); adminBody && (adminBody.hidden=true); adminAuth && (adminAuth.hidden=false); adminPass && (adminPass.value=''); }
-const adminModalEl=document.getElementById('adminModal');
-document.getElementById('openAdminBtn')?.addEventListener('click', async ()=>{
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data:s }=await sb.auth.getSession();
-  if(!s?.session){ showToast('Inicia sesión para abrir el panel.','warn'); return; }
-  await refreshAdminState();
-  openAdmin();
-  if(!__IS_ADMIN){ adminBody.hidden=true; adminAuth.hidden=false; adminNoRights.hidden=false; } else { adminNoRights.hidden=true; }
-});
-closeAdmin?.addEventListener('click', closeAdminFn);
-function startAdminSession(){ adminSessionEnd=Date.now()+ADMIN_SESSION_MIN*60*1000; }
-function adminSessionValid(){ return Date.now()<adminSessionEnd; }
-
-adminLogin?.addEventListener('click', async (ev)=>{
-  ev.preventDefault();
-  if(!__IS_ADMIN){ showToast('Tu cuenta no tiene privilegios de administrador.','error'); return; }
-  if((adminPass?.value||'').trim()!==ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
-  adminAuth.hidden=true; adminBody.hidden=false; startAdminSession(); currentAdminFilter=null; await renderAdmin(); showToast('Sesión admin iniciada','ok');
-});
-adminSearchBtn?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return showToast('Inicie sesión admin','error'); currentAdminFilter=(adminSearch?.value||'').trim()||null; await renderAdmin(); });
-adminClearSearch?.addEventListener('click', async ()=>{ if(adminBody.hidden || !adminSessionValid()) return; currentAdminFilter=null; adminSearch.value=''; await renderAdmin(); });
-document.getElementById('adminTable')?.addEventListener('click', async e=>{
-  const btn=e.target.closest('button[data-action]'); if(!btn) return;
-  const action=btn.getAttribute('data-action'); const id=btn.getAttribute('data-id');
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  if(action==='pdf'){ const { data: rows, error }=await sb.from('registros').select('*').eq('id',id).limit(1); if(error||!rows?.length) return showToast('Registro no disponible','error'); await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error')); }
-  else if(action==='del'){ const corr=btn.getAttribute('data-corr')||'—'; const ok=confirm(`¿Eliminar (soft delete) el registro ${corr}?`); if(!ok) return; const { error: upErr }=await sb.from('registros').update({ deleted_at:new Date().toISOString() }).eq('id',id).is('deleted_at',null); if(upErr){ console.error(upErr); showToast('No se pudo eliminar (permisos/RLS).','error'); return; } showToast('Registro marcado como eliminado.'); await renderAdmin(); }
-});
-async function renderAdmin(){
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+function openAdmin(){ const m=document.getElementById('adminModal'); m?.setAttribute('aria-hidden','false'); if(getComputedStyle(m).display==='none'){ m.style.display='block'; } const adminPass=document.getElementById('adminPass'); if(adminPass) adminPass.value=''; }
+function closeAdminFn(){ const m=document.getElementById('adminModal'); m?.setAttribute('aria-hidden','true'); if(m) m.style.display='none'; const adminBody=document.getElementById('adminBody'); const adminAuth=document.getElementById('adminAuth'); const adminPass=document.getElementById('adminPass'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
+function startAdminSession(){ window.__ADMIN_END = Date.now() + ADMIN_SESSION_MIN*60*1000; }
+function adminSessionValid(){ return Date.now() < (window.__ADMIN_END||0); }
+async function renderAdmin(sb){
   let q=sb.from('registros').select('*').order('created_at',{ascending:false});
   if(currentAdminFilter) q=q.eq('correlativo',currentAdminFilter);
   const { data: rows, error }=await q;
-  if(error){ exportStatus.textContent='Error al cargar: '+(error?.message||''); setChip(stErr,'Admin: '+(error?.message||'error'),'err'); return; }
+  const exportStatus=document.getElementById('exportStatus');
+  if(error){ if(exportStatus) exportStatus.textContent='Error al cargar: '+(error?.message||''); setChip(stErr,'Admin: '+(error?.message||'error'),'err'); return; }
+  const adminTbody=document.querySelector('#adminTable tbody');
   adminTbody.innerHTML='';
   for(const r of rows){
     const estado=r.deleted_at?'Eliminado':'Activo';
@@ -252,10 +352,10 @@ async function renderAdmin(){
   }
 }
 
-/* Datos (listado personal) */
-async function loadAndRender(){
-  const sb=getSupabaseClient(); if(!sb) return;
+/* Listado del usuario */
+async function loadAndRender(sb){
   const { data: session }=await sb.auth.getSession();
+  const tablaBody=document.querySelector('#tablaRegistros tbody');
   if(!session?.session){ tablaBody && (tablaBody.innerHTML=''); return; }
   try{
     const { data, error } = await sb
@@ -282,6 +382,7 @@ async function loadAndRender(){
   }
 }
 function renderTabla(rows){
+  const tablaBody=document.querySelector('#tablaRegistros tbody');
   if(!tablaBody) return;
   tablaBody.innerHTML='';
   for(const r of rows){
@@ -296,67 +397,6 @@ function renderTabla(rows){
     tablaBody.appendChild(tr);
   }
 }
-tablaBody?.addEventListener('click', async e=>{
-  const btn=e.target.closest('button[data-action="pdf"]'); if(!btn) return;
-  const id=btn.getAttribute('data-id');
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error }=await sb.from('registros').select('*').eq('id',id).limit(1);
-  if(error||!rows?.length) return showToast('Registro no disponible','error');
-  await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
-});
-
-/* Submit registro */
-form?.addEventListener('submit', async e=>{
-  e.preventDefault();
-  const sb=getSupabaseClient(); if(!sb){ showToast('Supabase no está disponible.','error'); return; }
-  const { data: s }=await sb.auth.getSession();
-  if(!s?.session){ showToast('Inicia sesión para registrar.','error'); return; }
-  const user=s.session.user;
-
-  const nombre=(form.nombre?.value||'').trim();
-  const telefono=(form.telefono?.value||'').trim();
-  const colegiadoNumero=(form.colegiadoNumero?.value||'').trim();
-  const colegiadoActivo=form.colegiadoActivo?.value;
-  const actividad=(form.actividad?.value||'').trim();
-  const institucion=(form.institucion?.value||'').trim();
-  const tipo=form.tipo?.value;
-  const fecha=form.fecha?.value;
-  const horas=Number(form.horas?.value);
-  const observaciones=(obsEl?.value||'').trim();
-
-  if(!nombre||!telefono||!colegiadoNumero||!colegiadoActivo||!actividad||!institucion||!tipo||!fecha||!horas){ showToast('Complete todos los campos obligatorios (*).','error'); return; }
-  if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)','error'); return; }
-  if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)','error'); return; }
-  if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).','error'); return; }
-  if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.','error'); return; }
-  if(!fileRef){ showToast('Adjunte el comprobante (PDF/JPG/PNG).','error'); markUploaderError(true); upZone?.focus?.(); return; }
-  const mb=fileRef.size/1024/1024; if(mb>MAX_FILE_MB){ showToast('Archivo supera 10 MB.','error'); return; }
-
-  const { data: corrData, error: corrErr }=await sb.rpc('next_correlativo');
-  if(corrErr||!corrData){ showToast('No se pudo obtener correlativo','error'); return; }
-  const correlativo=corrData;
-
-  const creditos=calcCreditos(horas);
-  const hash=hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
-
-  let archivo_url=null, archivo_mime=null;
-  {
-    const safeName=fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-    const path=`${user.id}/${correlativo}-${safeName}`;
-    const { error: upErr }=await sb.storage.from('comprobantes').upload(path,fileRef,{ contentType:fileRef.type, upsert:false });
-    if(upErr){ showToast('No se pudo subir el archivo','error'); return; }
-    archivo_url=path; archivo_mime=fileRef.type;
-  }
-
-  const payload={ usuario_id:user.id, correlativo, nombre, telefono, colegiado_numero:colegiadoNumero, colegiado_activo:colegiadoActivo, actividad, institucion, tipo, fecha, horas, creditos, observaciones, archivo_url, archivo_mime, hash };
-  const { data: inserted, error: insErr }=await sb.from('registros').insert(payload).select().single();
-  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+(insErr?.message||''),'error'); return; }
-
-  await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
-  showToast('Registro guardado y constancia generada.');
-  form.reset(); preview.innerHTML=''; creditosEl.value=''; fileRef=null; markUploaderError(false);
-  loadAndRender();
-});
 
 /* PDF (QR + logo) */
 const PDF_LOGO_URL='./assets/Logo-cpg.png';
