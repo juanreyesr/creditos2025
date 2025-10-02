@@ -6,47 +6,42 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Fallbacks: si el CSS externo no carga, los modales siguen funcionando -->
+  <!-- Fallback mínimo para modales si el CSS externo falla -->
   <style>
     .modal{display:none}
     .modal[aria-hidden="false"]{display:block}
     .modal .modal-content{max-height:90vh;overflow:auto}
-  </style>
-
-  <link rel="stylesheet" href="./styles.css?v=2" />
-  <link rel="icon" href="data:,">
-
-  <!-- Chips / Gate estilos mínimos -->
-  <style>
     .app-status{position:fixed;top:8px;right:8px;z-index:9999;display:flex;gap:8px;flex-wrap:wrap}
     .chip{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #334155;background:#0b1220;color:#e5e7eb}
     .chip.ok{background:#065f46;border-color:#064e3b}
     .chip.warn{background:#78350f;border-color:#92400e}
     .chip.err{background:#7f1d1d;border-color:#991b1b}
     .hidden{display:none!important}
-    .badge-admin{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#0ea5e9;color:#fff;border:1px solid #1f2937}
-    .badge-admin[hidden]{display:none!important}
-    .auth-gate{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:saturate(140%) blur(4px);display:none;align-items:center;justify-content:center;z-index:9990}
-    .auth-gate.show{display:flex}
-    .gate-card{background:var(--card,#0b1220);color:var(--text,#e5e7eb);max-width:720px;width:92%;padding:20px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(148,163,184,.2)}
+    .auth-gate{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:saturate(140%) blur(4px);display:flex;align-items:center;justify-content:center;z-index:9990}
+    .gate-card{background:#0b1220;color:#e5e7eb;max-width:720px;width:92%;padding:20px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(148,163,184,.2)}
     .gate-card h2{margin:0 0 8px;font-size:20px}
     .gate-card p{margin:0 0 12px;opacity:.9}
     .gate-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+    .badge-admin{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#0ea5e9;color:#fff;border:1px solid #1f2937}
+    .badge-admin[hidden]{display:none!important}
   </style>
+
+  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
 
   <!-- Diagnóstico -->
   <div class="app-status" aria-live="polite">
-    <span id="stSDK" class="chip warn">SDK: …</span>
+    <span id="stSDK" class="chip warn">SDK: cargando…</span>
     <span id="stSB" class="chip warn">Supabase: …</span>
     <span id="stAuth" class="chip warn">Auth: …</span>
     <span id="stErr" class="chip err hidden">Error: —</span>
   </div>
 
-  <!-- Gate de acceso -->
-  <div id="authGate" class="auth-gate" aria-hidden="true" aria-labelledby="gateTitle" role="dialog">
+  <!-- Gate de acceso (si no hay sesión, queda visible) -->
+  <div id="authGate" class="auth-gate" aria-hidden="false" aria-labelledby="gateTitle" role="dialog">
     <div class="gate-card">
       <h2 id="gateTitle">Acceso requerido</h2>
       <p>Debes registrarte para ingresar o <strong>iniciar sesión</strong> en tu usuario.</p>
@@ -261,8 +256,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- SDKs -->
-  <script id="supabaseCdn" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+  <!-- SDKs (siempre antes de script.js) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
@@ -274,6 +269,16 @@
   </script>
 
   <!-- App -->
-  <script src="./script.js?v=18"></script>
+  <script src="./script.js?v=19" defer></script>
+
+  <!-- Comprobación rápida de carga del script (útil en Vercel cache) -->
+  <script>
+    setTimeout(()=>{
+      if(!window.__APP_READY__){
+        console.error('script.js no cargó o falló antes del boot.');
+        alert('No se pudo cargar el script de la app. Refresca con Ctrl/Cmd+Shift+R. Si persiste, revisa la ruta ./script.js y la consola.');
+      }
+    }, 1500);
+  </script>
 </body>
 </html>
