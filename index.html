@@ -6,12 +6,10 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Evita que modales se muestren antes del CSS -->
   <style>.modal{display:none}</style>
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
 
-  <!-- Estado de app / diagnósticos -->
   <style>
     .app-status{position:fixed;top:8px;right:8px;z-index:9999;display:flex;gap:8px;flex-wrap:wrap}
     .chip{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #334155;background:#0b1220;color:#e5e7eb}
@@ -19,13 +17,8 @@
     .chip.warn{background:#78350f;border-color:#92400e}
     .chip.err{background:#7f1d1d;border-color:#991b1b}
     .hidden{display:none!important}
-    .badge-admin {
-      display:inline-flex; align-items:center; gap:6px;
-      padding:4px 8px; border-radius:999px; font-size:12px; font-weight:600;
-      background:#0ea5e9; color:#fff; border:1px solid #1f2937;
-    }
+    .badge-admin{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#0ea5e9;color:#fff;border:1px solid #1f2937}
     .badge-admin[hidden]{display:none!important}
-    /* Auth Gate */
     .auth-gate{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:saturate(140%) blur(4px);display:none;align-items:center;justify-content:center;z-index:9990}
     .auth-gate.show{display:flex}
     .gate-card{background:var(--card,#0b1220);color:var(--text,#e5e7eb);max-width:720px;width:92%;padding:20px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(148,163,184,.2)}
@@ -33,13 +26,11 @@
     .gate-card p{margin:0 0 12px;opacity:.9}
     .gate-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
   </style>
-
-  <!-- NOTA: cargamos nuestro script al final del <body> para asegurar DOM listo -->
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
 
-  <!-- Diagnóstico en vivo -->
+  <!-- Diagnóstico -->
   <div class="app-status" aria-live="polite">
     <span id="stSDK" class="chip warn">SDK: …</span>
     <span id="stSB" class="chip warn">Supabase: …</span>
@@ -47,16 +38,15 @@
     <span id="stErr" class="chip err hidden">Error: —</span>
   </div>
 
-  <!-- Auth Gate si no hay sesión -->
+  <!-- Gate de acceso -->
   <div id="authGate" class="auth-gate" aria-hidden="true" aria-labelledby="gateTitle" role="dialog">
     <div class="gate-card">
       <h2 id="gateTitle">Acceso requerido</h2>
       <p>Debes registrarte para ingresar o <strong>iniciar sesión</strong> en tu usuario.</p>
-      <p class="muted" style="font-size:13px">Con tu cuenta podrás registrar actividades, generar constancias y revisar tus créditos.</p>
       <div class="gate-actions">
-        <button class="btn primary" id="gateLogin">Iniciar sesión</button>
-        <button class="btn" id="gateSignup">Registrarme</button>
-        <button class="btn" id="gateRecover">¿Olvidaste tu contraseña?</button>
+        <button class="btn primary" id="gateLogin" type="button">Iniciar sesión</button>
+        <button class="btn" id="gateSignup" type="button">Registrarme</button>
+        <button class="btn" id="gateRecover" type="button">¿Olvidaste tu contraseña?</button>
         <a class="btn" href="./verificar.html">Verificar constancia</a>
       </div>
     </div>
@@ -137,7 +127,6 @@
           <textarea id="observaciones" maxlength="250" rows="3" placeholder="Opcional"></textarea>
         </label>
 
-        <!-- CARGA DE ARCHIVOS (OBLIGATORIA) -->
         <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de comprobante (obligatorio)" aria-required="true">
           <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
           <div class="uploader-inner">
@@ -226,6 +215,7 @@
             <tbody></tbody>
           </table>
         </div>
+
       </div>
 
       <div id="adminNoRights" class="card" hidden>
@@ -259,14 +249,13 @@
     </div>
   </div>
 
-  <!-- Toast -->
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <footer class="foot">
     <small>© 2025 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
   </footer>
 
-  <!-- SDKs externos (defer) -->
+  <!-- SDKs -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script id="supabaseCdn" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
@@ -279,6 +268,6 @@
   </script>
 
   <!-- Script principal -->
-  <script src="./script.js?v=15"></script>
+  <script src="./script.js?v=16"></script>
 </body>
 </html>
