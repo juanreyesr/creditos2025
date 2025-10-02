@@ -34,11 +34,18 @@ const QR_SIZE = 96;
 const LOGO_BELOW_GAP = 12;
 
 let __PDF_LOGO_DATAURL = null;
-let __SUPERADMIN = false;
 let __HAS_DELETED_AT = true;
 
+/* PDF.js worker (si está disponible) */
+window.addEventListener('load', ()=>{
+  if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+});
+
 function sanitize(str){
-  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;","&gt;":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
+  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
 }
 function showToast(msg, type="info"){
   const el = document.getElementById('toast');
@@ -89,13 +96,13 @@ const exportXLSXBtn = document.getElementById('exportXLSX');
 const adminSearch = document.getElementById('adminSearch');
 const adminSearchBtn = document.getElementById('adminSearchBtn');
 const adminClearSearch = document.getElementById('adminClearSearch');
-const adminState = document.getElementById('adminState');
+const exportStatus = document.getElementById('exportStatus');
 const showDeleted = document.getElementById('showDeleted');
 const adminModeBadge = document.getElementById('adminModeBadge');
 const superEmail = document.getElementById('superEmail');
 const superPass = document.getElementById('superPass');
 const superLogin = document.getElementById('superLogin');
-const exportStatus = document.getElementById('exportStatus');
+const adminState = document.getElementById('adminState');
 const diagBox = document.getElementById('diagBox');
 
 // Auth modal
@@ -109,6 +116,10 @@ const doSignup = document.getElementById('doSignup');
 const doResetPassword = document.getElementById('doResetPassword');
 const authState = document.getElementById('authState');
 
+// Entry modal
+const entryModal = document.getElementById('entryModal');
+const entryAccept = document.getElementById('entryAccept');
+
 /* =======================================================
    Inicialización UI + detecciones
 ======================================================= */
@@ -116,13 +127,22 @@ const authState = document.getElementById('authState');
   const now=new Date();
   if(fechaEl) fechaEl.max = now.toISOString().slice(0,10);
   try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
+
+  // Splash/entrada: debe aceptar para continuar
+  if (!localStorage.getItem('entryAccepted')) {
+    openModal(entryModal);
+  }
 })();
+entryAccept?.addEventListener('click', ()=>{
+  localStorage.setItem('entryAccepted','1');
+  closeModal(entryModal);
+});
 
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* Detección de deleted_at (no rompe si falla) */
+/* Detección de deleted_at (si la columna no existe, desactiva mostrar eliminados) */
 (async function detectDeletedAt(){
   const sb = getSupabaseClient(); if(!sb) return;
   try {
@@ -130,7 +150,7 @@ if (horasEl && creditosEl) {
     if (error && /(column|columna).*(deleted_at).*(does not exist|no existe)/i.test(sbErrMsg(error))) {
       __HAS_DELETED_AT = false;
       if (showDeleted) showDeleted.disabled = true;
-      if (diagBox) diagBox.textContent = 'Diagnóstico: la tabla public.registros no tiene columna deleted_at (funciona igual, pero no habrá filtro de eliminados).';
+      if (diagBox) diagBox.textContent = 'Diagnóstico: la tabla public.registros no tiene columna deleted_at.';
     }
   } catch {}
 })();
@@ -233,7 +253,7 @@ doLogin?.addEventListener('click', async ()=>{
 doResetPassword?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   const email = (authEmail?.value||'').trim();
-  if(!email){ showToast('Escribe tu correo en el campo Email y vuelve a pulsar "¿Olvidaste tu contraseña?"', 'warn'); return; }
+  if(!email){ showToast('Escriba su correo en el campo Email y vuelva a pulsar.', 'warn'); return; }
   authState.textContent = 'Enviando enlace...';
   const redirectTo = `${location.origin}/auth-callback.html`;
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
@@ -270,6 +290,7 @@ function renderTabla(rows){
   if(!tablaBody) return;
   tablaBody.innerHTML='';
   for(const r of rows){
+    const compBtn = r.archivo_url ? `<button class="btn" data-action="dl" data-path="${sanitize(r.archivo_url)}" type="button">Comp.</button>` : '';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${sanitize(r.correlativo)}</td>
@@ -277,19 +298,31 @@ function renderTabla(rows){
       <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,30))}${r.actividad.length>30?'…':''}</td>
       <td>${r.horas}</td>
       <td>${r.creditos}</td>
-      <td><button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button></td>`;
+      <td>
+        <button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button>
+        ${compBtn}
+      </td>`;
     tablaBody.appendChild(tr);
   }
 }
 
 tablaBody?.addEventListener('click', async (e)=>{
-  const btn = e.target.closest('button[data-action="pdf"]');
+  const btn = e.target.closest('button');
   if(!btn) return;
-  const id = btn.getAttribute('data-id');
+  const act = btn.getAttribute('data-action');
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
-  if(error || !rows?.length) return showToast('Registro no disponible: '+(error?sbErrMsg(error):'no encontrado'),'error');
-  await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+
+  if (act === 'pdf') {
+    const id = btn.getAttribute('data-id');
+    const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
+    if(error || !rows?.length) return showToast('Registro no disponible: '+(error?sbErrMsg(error):'no encontrado'),'error');
+    await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+  }
+
+  if (act === 'dl') {
+    const path = btn.getAttribute('data-path');
+    await downloadComprobante(path);
+  }
 });
 
 /* =======================================================
@@ -331,7 +364,6 @@ form?.addEventListener('submit', async (e)=>{
     upZone?.focus?.();
     return;
   }
-
   if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
   const sizeMB = fileRef.size/1024/1024;
   if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
@@ -365,7 +397,8 @@ form?.addEventListener('submit', async (e)=>{
   const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
   if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
 
-  await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
+  // Generar PDF con el comprobante recién adjuntado
+  await generarConstanciaPDF(inserted, fileRef).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
 
   form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
@@ -374,28 +407,28 @@ form?.addEventListener('submit', async (e)=>{
 });
 
 /* =======================================================
-   Panel Admin: local vs superadmin
+   Panel Admin (local y superadmin)
 ======================================================= */
 function openAdmin(){ adminModal?.setAttribute('aria-hidden','false'); if(adminPass) adminPass.value=''; }
-function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; __SUPERADMIN=false; updateAdminBadge(); }
+function closeAdminFn(){ adminModal?.setAttribute('aria-hidden','true'); if(adminBody) adminBody.hidden=true; if(adminAuth) adminAuth.hidden=false; if(adminPass) adminPass.value=''; }
 openAdminBtn?.addEventListener('click', openAdmin);
 closeAdmin?.addEventListener('click', closeAdminFn);
 window.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeAdminFn(); if(e.key.toLowerCase()==='a' && e.shiftKey && e.ctrlKey){ openAdmin(); } });
 
 let currentAdminFilter = null;
+let isSuperAdmin = false;
 function updateAdminBadge(){
-  if(adminModeBadge) adminModeBadge.textContent = `Modo: ${__SUPERADMIN ? 'Superadmin' : 'Admin local'}`;
+  if(adminModeBadge) adminModeBadge.textContent = `Modo: ${isSuperAdmin ? 'Superadmin' : 'Admin local'}`;
 }
 
 adminLogin?.addEventListener('click', async (ev)=>{
   ev.preventDefault();
   if((adminPass?.value||'').trim() !== ADMIN_PASSWORD){ showToast('Contraseña incorrecta','error'); return; }
-  adminAuth.hidden = true; adminBody.hidden = false; __SUPERADMIN = false; updateAdminBadge();
+  adminAuth.hidden = true; adminBody.hidden = false; isSuperAdmin = false; updateAdminBadge();
   await renderAdmin();
   showToast('Sesión admin local iniciada','ok');
 });
 
-/* Superadmin (correo/contraseña) */
 superLogin?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
   adminState.textContent = 'Verificando...';
@@ -422,7 +455,7 @@ superLogin?.addEventListener('click', async ()=>{
   if(pErr){ adminState.textContent = 'Error leyendo perfil: '+sbErrMsg(pErr); return; }
   if(!perfil?.is_admin){ adminState.textContent = 'No tienes permisos de superadmin'; return; }
 
-  adminAuth.hidden = true; adminBody.hidden = false; __SUPERADMIN = true; updateAdminBadge();
+  adminAuth.hidden = true; adminBody.hidden = false; isSuperAdmin = true; updateAdminBadge();
   currentAdminFilter = null;
   await renderAdmin();
   adminState.textContent = 'OK (superadmin)';
@@ -450,6 +483,7 @@ async function renderAdmin(){
   adminTbody.innerHTML='';
   for(const r of rows || []){
     const estado = r.deleted_at ? 'Eliminado' : 'Activo';
+    const dlBtn = r.archivo_url ? `<button class="btn" data-action="dl" data-path="${sanitize(r.archivo_url)}" type="button">Descargar</button>` : '';
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td>${sanitize(r.correlativo)}</td>
@@ -468,6 +502,7 @@ async function renderAdmin(){
       <td>${estado}</td>
       <td>
         <button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button>
+        ${dlBtn}
         ${r.deleted_at ? '' : `<button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="del" type="button">Eliminar</button>`}
       </td>`;
     adminTbody.appendChild(tr);
@@ -502,6 +537,11 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     const { data: rows, error } = await sb.from('registros').select('*').eq('id', id).limit(1);
     if(error || !rows?.length) return showToast('Registro no disponible: '+(error?sbErrMsg(error):'no encontrado'),'error');
     await generarConstanciaPDF(rows[0]).catch(()=> showToast('Error al generar PDF','error'));
+  }
+
+  if(action==='dl'){
+    const path = btn.getAttribute('data-path');
+    await downloadComprobante(path);
   }
 
   if(action==='del'){
@@ -552,7 +592,79 @@ exportXLSXBtn?.addEventListener('click', async ()=>{
 });
 
 /* =======================================================
-   PDF + QR + LOGO
+   Descargar comprobante (signed URL)
+======================================================= */
+async function downloadComprobante(path){
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  if(!path){ showToast('No hay archivo asociado.','warn'); return; }
+  try {
+    const { data, error } = await sb.storage.from('comprobantes').createSignedUrl(path, 60*60);
+    if(error || !data?.signedUrl){ showToast('No se pudo generar enlace de descarga: '+sbErrMsg(error),'error'); return; }
+    const a = document.createElement('a');
+    a.href = data.signedUrl;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.click();
+  } catch (e) {
+    showToast('Error al descargar: '+(e?.message||e),'error');
+  }
+}
+
+/* =======================================================
+   Helpers: obtener imagen del comprobante (imagen o 1a página de PDF)
+======================================================= */
+function blobToDataURL(blob){
+  return new Promise((resolve)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(fr.result);
+    fr.onerror = ()=> resolve(null);
+    fr.readAsDataURL(blob);
+  });
+}
+
+async function pdfFirstPageToDataURL(blob, scale=1.4){
+  if(!window.pdfjsLib) return null;
+  const url = URL.createObjectURL(blob);
+  try{
+    const pdf = await pdfjsLib.getDocument({url}).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({scale});
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({canvasContext: ctx, viewport}).promise;
+    return canvas.toDataURL('image/png');
+  }catch(e){
+    console.warn('pdf render fail', e); return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function getPreviewDataUrlFromLocal(file){
+  if(!file) return null;
+  if(file.type.startsWith('image/')) return await blobToDataURL(file);
+  if(file.type === 'application/pdf') return await pdfFirstPageToDataURL(file);
+  return null;
+}
+
+async function getPreviewDataUrlFromStorage(path){
+  if(!path) return null;
+  const sb = getSupabaseClient(); if(!sb) return null;
+  const { data, error } = await sb.storage.from('comprobantes').createSignedUrl(path, 60*5);
+  if(error || !data?.signedUrl) return null;
+  try{
+    const res = await fetch(data.signedUrl);
+    const blob = await res.blob();
+    if(blob.type.startsWith('image/')) return await blobToDataURL(blob);
+    if(blob.type === 'application/pdf') return await pdfFirstPageToDataURL(blob);
+  }catch(e){ return null; }
+  return null;
+}
+
+/* =======================================================
+   PDF + QR + LOGO + COMPROBANTE incrustado
 ======================================================= */
 async function ensurePdfLogoDataUrl(){
   if (__PDF_LOGO_DATAURL !== null) return __PDF_LOGO_DATAURL;
@@ -582,7 +694,7 @@ async function ensurePdfLogoDataUrl(){
   }
 }
 
-async function generarConstanciaPDF(rec){
+async function generarConstanciaPDF(rec, localFileBlob){
   if (!window.jspdf || !window.jspdf.jsPDF) {
     console.error('jsPDF no está disponible.'); showToast('jsPDF no cargó.', 'error'); throw new Error('jsPDF missing');
   }
@@ -590,6 +702,7 @@ async function generarConstanciaPDF(rec){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
+  // Cabecera
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
 
@@ -615,6 +728,7 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
+  // QR y URL
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -624,26 +738,68 @@ async function generarConstanciaPDF(rec){
       doc.text('Verifique la autenticidad escaneando el código QR o visitando:', pad, 790);
       doc.text(verifyUrl, pad, 805, { maxWidth: 500 });
     }
-  } catch (err) {
-    console.warn('QR no pudo generarse:', err);
-  }
+  } catch (err) { console.warn('QR no pudo generarse:', err); }
 
+  // Logo debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
       const logoY = QR_Y + QR_SIZE + LOGO_BELOW_GAP;
       doc.addImage(logo, 'PNG', QR_X, logoY, PDF_LOGO_W, PDF_LOGO_H);
     }
+  } catch (e) { console.warn('No se pudo insertar logo en PDF:', e); }
+
+  // ---------- Comprobante adjunto (nueva página) ----------
+  try {
+    let evidDataUrl = null;
+    if (localFileBlob) {
+      evidDataUrl = await getPreviewDataUrlFromLocal(localFileBlob);
+    } else if (rec.archivo_url) {
+      evidDataUrl = await getPreviewDataUrlFromStorage(rec.archivo_url);
+    }
+    if (evidDataUrl) {
+      doc.addPage();
+      doc.setFont('helvetica','bold'); doc.setFontSize(12);
+      doc.text('Comprobante adjunto', pad, pad);
+
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const usableW = pageW - pad*2;
+      const topY = pad + 12;
+
+      // Para conocer proporción, creamos una imagen temporal
+      const tmpImg = new Image();
+      const loaded = new Promise(res => { tmpImg.onload = res; tmpImg.onerror = res; });
+      tmpImg.src = evidDataUrl; await loaded;
+
+      const imgW = tmpImg.naturalWidth || 1000;
+      const imgH = tmpImg.naturalHeight || 1000;
+      const aspect = imgW / imgH;
+
+      let drawW = usableW;
+      let drawH = drawW / aspect;
+      const maxH = pageH - pad - topY;
+
+      if (drawH > maxH) {
+        const scale = maxH / drawH;
+        drawW *= scale;
+        drawH *= scale;
+      }
+
+      doc.addImage(evidDataUrl, 'PNG', pad, topY, drawW, drawH);
+    }
   } catch (e) {
-    console.warn('No se pudo insertar logo en PDF:', e);
+    console.warn('No se pudo incrustar comprobante:', e);
   }
 
+  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
   doc.save(`Constancia_${rec.correlativo}.pdf`);
 }
 
+/* Utilidades para QR */
 function getBase64Image(img){
   const canvas=document.createElement('canvas');
   canvas.width=img.naturalWidth || img.width;
