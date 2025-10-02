@@ -6,53 +6,27 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Fallback mínimo para modales si el CSS externo falla -->
-  <style>
-    .modal{display:none}
-    .modal[aria-hidden="false"]{display:block}
-    .modal .modal-content{max-height:90vh;overflow:auto}
-    .app-status{position:fixed;top:8px;right:8px;z-index:9999;display:flex;gap:8px;flex-wrap:wrap}
-    .chip{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #334155;background:#0b1220;color:#e5e7eb}
-    .chip.ok{background:#065f46;border-color:#064e3b}
-    .chip.warn{background:#78350f;border-color:#92400e}
-    .chip.err{background:#7f1d1d;border-color:#991b1b}
-    .hidden{display:none!important}
-    .auth-gate{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:saturate(140%) blur(4px);display:flex;align-items:center;justify-content:center;z-index:9990}
-    .gate-card{background:#0b1220;color:#e5e7eb;max-width:720px;width:92%;padding:20px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(148,163,184,.2)}
-    .gate-card h2{margin:0 0 8px;font-size:20px}
-    .gate-card p{margin:0 0 12px;opacity:.9}
-    .gate-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-    .badge-admin{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;font-size:12px;font-weight:600;background:#0ea5e9;color:#fff;border:1px solid #1f2937}
-    .badge-admin[hidden]{display:none!important}
-  </style>
-
+  <style>.modal{display:none}</style>
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
+
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+
+  <!-- Supabase project keys -->
+  <script>
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
+  </script>
+
+  <!-- Actualiza versión para evitar caché -->
+  <script src="./script.js?v=12" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
-
-  <!-- Diagnóstico -->
-  <div class="app-status" aria-live="polite">
-    <span id="stSDK" class="chip warn">SDK: cargando…</span>
-    <span id="stSB" class="chip warn">Supabase: …</span>
-    <span id="stAuth" class="chip warn">Auth: …</span>
-    <span id="stErr" class="chip err hidden">Error: —</span>
-  </div>
-
-  <!-- Gate de acceso (si no hay sesión, queda visible) -->
-  <div id="authGate" class="auth-gate" aria-hidden="false" aria-labelledby="gateTitle" role="dialog">
-    <div class="gate-card">
-      <h2 id="gateTitle">Acceso requerido</h2>
-      <p>Debes registrarte para ingresar o <strong>iniciar sesión</strong> en tu usuario.</p>
-      <div class="gate-actions">
-        <button class="btn primary" id="gateLogin" type="button">Iniciar sesión</button>
-        <button class="btn" id="gateSignup" type="button">Registrarme</button>
-        <button class="btn" id="gateRecover" type="button">¿Olvidaste tu contraseña?</button>
-        <a class="btn" href="./verificar.html">Verificar constancia</a>
-      </div>
-    </div>
-  </div>
 
   <header class="topbar">
     <div class="brand">
@@ -60,16 +34,13 @@
       <h1>Registro de Créditos Académicos</h1>
     </div>
     <nav class="top-actions" style="display:flex; gap:8px; align-items:center">
-      <span id="adminBadge" class="badge-admin" hidden>✔ Eres administrador</span>
       <a class="btn" href="./verificar.html">Verificar constancia</a>
       <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
       <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
-      <button class="btn" id="logoutBtn" type="button" style="display:none">Cerrar sesión</button>
     </nav>
   </header>
 
-  <main class="container" aria-live="polite">
-    <!-- FORMULARIO -->
+  <main class="container">
     <section class="card" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
       <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
@@ -81,7 +52,8 @@
           </label>
 
           <label>Celular (GT) *
-            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
+            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555"
+                   inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
           </label>
 
           <label>Número de colegiado*
@@ -131,10 +103,13 @@
         </label>
 
         <!-- CARGA DE ARCHIVOS (OBLIGATORIA) -->
-        <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de comprobante (obligatorio)" aria-required="true">
-          <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
+        <div class="uploader" id="uploader" tabindex="0"
+             aria-label="Zona de carga de comprobante (obligatorio)" aria-required="true">
+          <input type="file" id="archivo"
+                 accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
           <div class="uploader-inner">
-            <p><strong>Arrastre y suelte</strong> su comprobante <strong>(obligatorio)</strong> — formatos: PDF, JPG, PNG, JPEG — o <button type="button" class="linklike" id="browseBtn">examinar</button></p>
+            <p><strong>Arrastre y suelte</strong> su comprobante <strong>(obligatorio)</strong> — PDF, JPG, PNG, JPEG —
+               o <button type="button" class="linklike" id="browseBtn">examinar</button></p>
             <p class="hint">Tamaño máximo: 10 MB</p>
             <div id="preview" class="preview" aria-live="polite"></div>
           </div>
@@ -147,7 +122,6 @@
       </form>
     </section>
 
-    <!-- HISTORIAL -->
     <section class="card" aria-labelledby="histTitle">
       <h2 id="histTitle">Mis registros (sesión actual)</h2>
       <div class="table-wrap">
@@ -172,25 +146,43 @@
   <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
     <div class="modal-content" role="document">
       <header class="modal-header">
-        <h3 id="adminTitle">Panel de Administrador <small id="adminRoleBadge" class="badge-admin" hidden style="margin-left:8px">✔ Eres administrador</small></h3>
+        <h3 id="adminTitle">Panel de Administrador</h3>
         <button class="iconbtn" id="closeAdmin" type="button">✕</button>
       </header>
 
+      <!-- Acceso clásico por PIN (permanece por compatibilidad) -->
       <div id="adminAuth">
-        <p>Ingrese contraseña de administrador:</p>
+        <p>Ingrese contraseña de administrador (PIN local):</p>
         <input type="password" id="adminPass" placeholder="••••••" />
         <div class="actions">
           <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
         </div>
-        <p id="adminGateNote" class="muted" style="margin-top:8px">Este panel requiere que su cuenta tenga privilegios de administrador.</p>
+        <hr />
+        <!-- NUEVO: Superadmin con usuario/contraseña -->
+        <h4 style="margin-top:8px">Entrar como superadmin</h4>
+        <p class="muted">Use un usuario de Supabase con permiso <code>is_admin</code>.</p>
+        <label>Correo
+          <input type="email" id="superEmail" placeholder="admin@dominio.com" />
+        </label>
+        <label>Contraseña
+          <input type="password" id="superPass" placeholder="********" />
+        </label>
+        <div class="actions">
+          <button class="btn" id="superLogin" type="button">Entrar como superadmin</button>
+          <span class="muted" id="adminState">—</span>
+        </div>
       </div>
 
       <div id="adminBody" hidden>
         <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-          <input type="text" id="adminSearch" placeholder="Buscar correlativo (p.ej. CPG-202509-0001)" style="flex:1;min-width:260px" />
+          <strong id="adminModeBadge" class="badge">Modo: Admin local</strong>
+          <input type="text" id="adminSearch" placeholder="Buscar correlativo (CPG-AAAAmm-####)" style="flex:1;min-width:260px" />
           <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
           <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
-          <span class="muted" style="margin-left:auto">Exporta sin eliminados</span>
+          <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
+            <input type="checkbox" id="showDeleted" />
+            <span class="muted">Incluir eliminados</span>
+          </label>
           <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
           <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
           <span class="muted" id="exportStatus">—</span>
@@ -220,17 +212,11 @@
             <tbody></tbody>
           </table>
         </div>
-
-      </div>
-
-      <div id="adminNoRights" class="card" hidden>
-        <p><strong>No tienes privilegios de administrador.</strong></p>
-        <p class="muted">Solicita acceso al responsable del sistema.</p>
       </div>
     </div>
   </div>
 
-  <!-- MODAL AUTENTICACIÓN -->
+  <!-- MODAL DE AUTENTICACIÓN (usuarios normales) -->
   <div class="modal" id="authModal" aria-hidden="true" role="dialog">
     <div class="modal-content" role="document">
       <header class="modal-header">
@@ -244,10 +230,10 @@
         <label>Contraseña
           <input type="password" id="authPass" placeholder="********" autocomplete="current-password" />
         </label>
-        <div class="actions" style="margin-top:10px">
+        <div class="actions" style="margin-top:10px;gap:8px;flex-wrap:wrap">
           <button class="btn primary" id="doLogin" type="button">Entrar</button>
           <button class="btn" id="doSignup" type="button">Crear cuenta</button>
-          <button class="btn" id="doRecover" type="button">¿Olvidaste tu contraseña?</button>
+          <button class="btn warn" id="doResetPassword" type="button">¿Olvidaste tu contraseña?</button>
           <span class="muted" id="authState">—</span>
         </div>
       </div>
@@ -256,29 +242,8 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- SDKs (siempre antes de script.js) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
-
-  <!-- Credenciales Supabase -->
-  <script>
-    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
-    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
-  </script>
-
-  <!-- App -->
-  <script src="./script.js?v=19" defer></script>
-
-  <!-- Comprobación rápida de carga del script (útil en Vercel cache) -->
-  <script>
-    setTimeout(()=>{
-      if(!window.__APP_READY__){
-        console.error('script.js no cargó o falló antes del boot.');
-        alert('No se pudo cargar el script de la app. Refresca con Ctrl/Cmd+Shift+R. Si persiste, revisa la ruta ./script.js y la consola.');
-      }
-    }, 1500);
-  </script>
+  <footer class="foot">
+    <small>© 2025 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
+  </footer>
 </body>
 </html>
