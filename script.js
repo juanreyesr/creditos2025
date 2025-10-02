@@ -25,7 +25,6 @@ const ADMIN_SESSION_MIN = 15;
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
-/* PDF: Logo + QR */
 const PDF_LOGO_URL = './assets/Logo-cpg.png';
 const PDF_LOGO_W = 96;
 const PDF_LOGO_H = 96;
@@ -36,10 +35,10 @@ const LOGO_BELOW_GAP = 12;
 
 let __PDF_LOGO_DATAURL = null;
 let __SUPERADMIN = false;
-let __HAS_DELETED_AT = true; // se detecta al inicio
+let __HAS_DELETED_AT = true;
 
 function sanitize(str){
-  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
+  return String(str || "").replace(/[&<>\"']/g, m => ({"&":"&amp;","<":"&lt;","&gt;":"&gt;","\"":"&quot;","'":"&#39;"}[m]));
 }
 function showToast(msg, type="info"){
   const el = document.getElementById('toast');
@@ -111,7 +110,7 @@ const doResetPassword = document.getElementById('doResetPassword');
 const authState = document.getElementById('authState');
 
 /* =======================================================
-   Inicialización UI + Feature flags
+   Inicialización UI + detecciones
 ======================================================= */
 (function(){
   const now=new Date();
@@ -123,24 +122,22 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* Detección: ¿existe deleted_at? */
+/* Detección de deleted_at (no rompe si falla) */
 (async function detectDeletedAt(){
   const sb = getSupabaseClient(); if(!sb) return;
   try {
     const { error } = await sb.from('registros').select('deleted_at').limit(1);
-    if (error) {
-      if (/(column|columna).*(deleted_at).*(does not exist|no existe)/i.test(sbErrMsg(error))) {
-        __HAS_DELETED_AT = false;
-        if (showDeleted) showDeleted.disabled = true;
-        if (diagBox) diagBox.textContent = 'Diagnóstico: la tabla public.registros no tiene la columna deleted_at. El sistema seguirá funcionando, pero te recomiendo ejecutar el SQL para agregarla.';
-      }
+    if (error && /(column|columna).*(deleted_at).*(does not exist|no existe)/i.test(sbErrMsg(error))) {
+      __HAS_DELETED_AT = false;
+      if (showDeleted) showDeleted.disabled = true;
+      if (diagBox) diagBox.textContent = 'Diagnóstico: la tabla public.registros no tiene columna deleted_at (funciona igual, pero no habrá filtro de eliminados).';
     }
-  } catch {
-    // sin cambios
-  }
+  } catch {}
 })();
 
-/* ---------- Uploader obligatorio ---------- */
+/* =======================================================
+   Uploader obligatorio
+======================================================= */
 function markUploaderError(on=true){
   if(!upZone) return;
   upZone.style.transition = 'border-color .2s';
@@ -179,8 +176,7 @@ function handleFile(file){
     markUploaderError(true);
     return;
   }
-  fileRef=file;
-  markUploaderError(false);
+  fileRef=file; markUploaderError(false);
 
   if(file.type==='application/pdf'){
     const url=URL.createObjectURL(file);
@@ -194,7 +190,9 @@ function handleFile(file){
   }
 }
 
-/* ---------- Auth UI ---------- */
+/* =======================================================
+   Auth UI + reset password
+======================================================= */
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
@@ -210,16 +208,10 @@ doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   authState.textContent = 'Creando cuenta...';
-
   const email = (authEmail?.value||'').trim();
   const password = authPass?.value || '';
   const redirectTo = `${location.origin}/auth-callback.html`;
-
-  const { error } = await sb.auth.signUp({
-    email, password,
-    options: { emailRedirectTo: redirectTo }
-  });
-
+  const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
   if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
   authState.textContent='Revisa tu correo y verifica tu cuenta.';
 });
@@ -238,12 +230,11 @@ doLogin?.addEventListener('click', async ()=>{
   await loadAndRender();
 });
 
-/* Reset de contraseña */
 doResetPassword?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   const email = (authEmail?.value||'').trim();
   if(!email){ showToast('Escribe tu correo en el campo Email y vuelve a pulsar "¿Olvidaste tu contraseña?"', 'warn'); return; }
-  authState.textContent = 'Enviando correo de restablecimiento...';
+  authState.textContent = 'Enviando enlace...';
   const redirectTo = `${location.origin}/auth-callback.html`;
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo });
   if(error){ authState.textContent = 'Error: '+sbErrMsg(error); return; }
@@ -377,12 +368,8 @@ form?.addEventListener('submit', async (e)=>{
   await generarConstanciaPDF(inserted).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
 
-  form.reset();
-  if(preview) preview.innerHTML='';
-  if(creditosEl) creditosEl.value='';
-  fileRef = null;
-  markUploaderError(false);
-
+  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+  fileRef = null; markUploaderError(false);
   loadAndRender();
 });
 
@@ -419,14 +406,20 @@ superLogin?.addEventListener('click', async ()=>{
   const { data: s } = await sb.auth.getSession();
   if(!s?.session){
     const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-    if(error){ adminState.textContent = 'Error: '+sbErrMsg(error); return; }
+    if(error){ adminState.textContent = 'Error al iniciar sesión: '+sbErrMsg(error); return; }
   }
 
-  const { data: me } = await sb.auth.getUser();
+  const { data: me, error: uErr } = await sb.auth.getUser();
+  if(uErr){ adminState.textContent = 'Error obteniendo usuario: '+sbErrMsg(uErr); return; }
   if(!me?.user){ adminState.textContent = 'No hay sesión activa'; return; }
 
-  const { data: perfil, error: pErr } = await sb.from('perfiles').select('is_admin').eq('user_id', me.user.id).maybeSingle();
-  if(pErr){ adminState.textContent = 'Error leyendo perfil'; return; }
+  const { data: perfil, error: pErr } = await sb
+    .from('perfiles')
+    .select('is_admin')
+    .eq('user_id', me.user.id)
+    .maybeSingle();
+
+  if(pErr){ adminState.textContent = 'Error leyendo perfil: '+sbErrMsg(pErr); return; }
   if(!perfil?.is_admin){ adminState.textContent = 'No tienes permisos de superadmin'; return; }
 
   adminAuth.hidden = true; adminBody.hidden = false; __SUPERADMIN = true; updateAdminBadge();
@@ -481,7 +474,7 @@ async function renderAdmin(){
   }
 
   if (diagBox) {
-    diagBox.textContent = `Diagnóstico: SB_URL ok, deleted_at=${__HAS_DELETED_AT ? 'sí' : 'no'}. Registros cargados: ${rows?.length||0}.`;
+    diagBox.textContent = `Diagnóstico: deleted_at=${__HAS_DELETED_AT ? 'sí' : 'no'}. Registros cargados: ${rows?.length||0}.`;
   }
 }
 
@@ -515,7 +508,7 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     const corr = btn.getAttribute('data-corr') || '—';
     const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}?`);
     if(!ok) return;
-    const patch = __HAS_DELETED_AT ? { deleted_at: new Date().toISOString() } : { /* fallback: no deleted_at */ };
+    const patch = __HAS_DELETED_AT ? { deleted_at: new Date().toISOString() } : { /* sin deleted_at */ };
     const { error: upErr } = await sb.from('registros').update(patch).eq('id', id);
     if(upErr){ console.error(upErr); showToast('No se pudo eliminar (RLS): '+sbErrMsg(upErr),'error'); return; }
     showToast('Registro marcado como eliminado.');
@@ -622,7 +615,6 @@ async function generarConstanciaPDF(rec){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -636,7 +628,6 @@ async function generarConstanciaPDF(rec){
     console.warn('QR no pudo generarse:', err);
   }
 
-  // Logo debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
