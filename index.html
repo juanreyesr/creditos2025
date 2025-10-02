@@ -6,10 +6,13 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
 
-  <!-- Oculta modales si JS tarda en cargar -->
-  <style>.modal{display:none}</style>
+  <!-- Fallbacks: si el CSS externo no carga, los modales siguen funcionando -->
+  <style>
+    .modal{display:none}
+    .modal[aria-hidden="false"]{display:block}
+    .modal .modal-content{max-height:90vh;overflow:auto}
+  </style>
 
-  <!-- Tu CSS -->
   <link rel="stylesheet" href="./styles.css?v=2" />
   <link rel="icon" href="data:,">
 
@@ -258,7 +261,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- SDKs (una sola vez) -->
+  <!-- SDKs -->
   <script id="supabaseCdn" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
@@ -271,6 +274,6 @@
   </script>
 
   <!-- App -->
-  <script src="./script.js?v=17"></script>
+  <script src="./script.js?v=18"></script>
 </body>
 </html>
