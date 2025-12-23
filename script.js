@@ -362,7 +362,7 @@ doSignup?.addEventListener('click', async ()=>{
   const redirectTo = `${location.origin}/auth-callback.html`;
   const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
   if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
-  authState.textContent='Ya ha sido creada tu cuenta, pueden pulsar ingresar';
+  authState.textContent='Ya ha sido creada tu cuenta, pueden pulsar el botón -Entrar-';
 });
 
 doLogin?.addEventListener('click', async ()=>{
