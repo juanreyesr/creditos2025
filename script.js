@@ -70,6 +70,75 @@ function calcCreditos(h){ const n=Number(h); if(!isFinite(n)||n<=0) return 0; re
 function hashSimple(text){ let h=0; for(let i=0;i<text.length;i++){ h=(h<<5)-h + text.charCodeAt(i); h|=0; } return Math.abs(h).toString(36); }
 function sbErrMsg(err){ return err?.message || err?.hint || err?.code || 'Error desconocido'; }
 
+// =====================
+// Prefill datos personales (último registro + localStorage)
+// =====================
+function lsKey(userId, field) {
+  return `creditos2025:${userId}:${field}`;
+}
+
+function precargarDesdeLocalStorage(userId) {
+  const elNombre = document.querySelector("#nombre");
+  const elTelefono = document.querySelector("#telefono");
+  const elColegiado = document.querySelector("#colegiadoNumero");
+
+  if (elNombre && !elNombre.value) {
+    const v = localStorage.getItem(lsKey(userId, "nombre"));
+    if (v) elNombre.value = v;
+  }
+
+  if (elTelefono && !elTelefono.value) {
+    const v = localStorage.getItem(lsKey(userId, "telefono"));
+    if (v) elTelefono.value = v;
+  }
+
+  if (elColegiado && !elColegiado.value) {
+    const v = localStorage.getItem(lsKey(userId, "colegiadoNumero"));
+    if (v) elColegiado.value = v;
+  }
+}
+
+function guardarDatosRapidos(userId, nombre, telefono, colegiadoNumero) {
+  if (nombre) localStorage.setItem(lsKey(userId, "nombre"), nombre);
+  if (telefono) localStorage.setItem(lsKey(userId, "telefono"), telefono);
+  if (colegiadoNumero) localStorage.setItem(lsKey(userId, "colegiadoNumero"), colegiadoNumero);
+}
+
+async function precargarDatosDesdeUltimoRegistro(userId) {
+  // Ojo: ajusta los nombres de columnas a los que realmente tienes en tu tabla "registros"
+  // (en tu app actual suelen estar como: nombre, telefono, colegiado_numero o colegiadoNumero)
+  const { data, error } = await sb
+    .from("registros")
+    .select("nombre, telefono, colegiadoNumero, colegiado_numero")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.warn("No se pudo precargar desde el último registro:", error.message);
+    return;
+  }
+
+  const last = data?.[0];
+  if (!last) return;
+
+  const nombre = last.nombre || "";
+  const telefono = last.telefono || "";
+  const colegiadoNumero = last.colegiadoNumero || last.colegiado_numero || "";
+
+  const elNombre = document.querySelector("#nombre");
+  const elTelefono = document.querySelector("#telefono");
+  const elColegiado = document.querySelector("#colegiadoNumero");
+
+  // Solo llena si el usuario aún no escribió nada
+  if (elNombre && !elNombre.value && nombre) elNombre.value = nombre;
+  if (elTelefono && !elTelefono.value && telefono) elTelefono.value = telefono;
+  if (elColegiado && !elColegiado.value && colegiadoNumero) elColegiado.value = colegiadoNumero;
+
+  // Persistimos para carga instantánea en próximas visitas
+  guardarDatosRapidos(userId, nombre, telefono, colegiadoNumero);
+}
+
 /* =======================================================
    DOM refs
 ======================================================= */
@@ -279,6 +348,9 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
   if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
 });
 
+precargarDesdeLocalStorage(user.id);
+await precargarDatosDesdeUltimoRegistro(user.id);
+
 /* =======================================================
    Datos (vista usuario)
 ======================================================= */
@@ -361,6 +433,8 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
   try {
     if (consolidadoState) consolidadoState.textContent = 'Generando consolidado...';
     const { doc, blob, filename } = await generarConsolidadoPDF(rows);
+
+     guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
 
     // Subir/actualizar en Storage (ruta fija)
     const path = `consolidados/${userId}/registro_unificado_creditos.pdf`;
