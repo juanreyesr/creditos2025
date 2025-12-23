@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Registro de Créditos Académicos — CPG</title>
+
+  <!-- Evita que los modales aparezcan al inicio si el CSS no carga -->
+  <style>.modal{display:none}</style>
+
+  <!-- Tu CSS -->
+  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="icon" href="data:,">
+
+  <!-- Librerías -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+
+  <!-- PDF.js para rasterizar la primera página de PDFs adjuntos -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js" defer></script>
+
+  <!-- Credenciales Supabase -->
+  <script>
+    window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
+    window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
+  </script>
+
+  <!-- App -->
+  <script src="./script.js?v=17" defer></script>
+</head>
+<body>
+  <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
+
+  <header class="topbar">
+    <div class="brand">
+      <img src="./assets/Logo-cpg.png" alt="Colegio de Psicólogos de Guatemala" class="logo-img" />
+      <h1>Registro de Créditos Académicos</h1>
+    </div>
+    <nav class="top-actions" style="display:flex; gap:8px; align-items:center">
+      <a class="btn" href="https://youtu.be/zitwRCdNgQc" target="_blank" rel="noopener">Guía de uso</a>
+      <a class="btn" href="./verificar.html">Verificar constancia</a>
+      <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
+      <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="card" aria-labelledby="formTitle">
+      <h2 id="formTitle">Nueva actividad científico-académica</h2>
+      <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
+
+      <form id="registroForm" novalidate>
+        <div class="grid">
+          <label>Nombre completo*
+            <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
+          </label>
+
+          <label>Celular (GT) *
+            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
+          </label>
+
+          <label>Número de colegiado*
+            <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" />
+          </label>
+
+          <label>¿Colegiado activo?*
+            <select name="colegiadoActivo" id="colegiadoActivo" required>
+              <option value="">— Seleccione —</option>
+              <option value="Sí">Sí</option>
+              <option value="No">No</option>
+            </select>
+          </label>
+
+          <label>Nombre de la actividad*
+            <input type="text" name="actividad" id="actividad" required maxlength="140" />
+          </label>
+
+          <label>Institución / Organizador*
+            <input type="text" name="institucion" id="institucion" required maxlength="140" />
+          </label>
+
+          <label>Tipo de actividad*
+            <select name="tipo" id="tipo" required>
+              <option value="">— Seleccione —</option>
+              <option>Teórica</option>
+              <option>Práctica</option>
+              <option>Voluntariado profesional</option>
+            </select>
+          </label>
+
+          <label>Fecha de la actividad*
+            <input type="date" name="fecha" id="fecha" required />
+          </label>
+
+          <label>Horas registradas* (admite decimales)
+            <input type="number" step="0.5" min="0.5" max="200" name="horas" id="horas" required />
+          </label>
+
+          <label>Créditos calculados
+            <input type="text" id="creditos" readonly />
+          </label>
+        </div>
+
+        <label>Observaciones (máx. 250 caracteres)
+          <textarea id="observaciones" maxlength="250" rows="3" placeholder="Opcional"></textarea>
+        </label>
+
+        <!-- CARGA DE ARCHIVOS (OBLIGATORIA) -->
+        <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de comprobante (obligatorio)" aria-required="true">
+          <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
+          <div class="uploader-inner">
+            <p>
+              <strong>Arrastre y suelte</strong> su comprobante <strong>(obligatorio)</strong> — formatos: PDF, JPG, PNG, JPEG —
+              o <button type="button" class="linklike" id="browseBtn">examinar</button>
+            </p>
+            <p class="hint">Tamaño máximo: 10 MB</p>
+            <div id="preview" class="preview" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn primary">Registrar y generar constancia</button>
+          <button type="reset" class="btn">Limpiar</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="histTitle">
+      <h2 id="histTitle">Mis registros (sesión actual)</h2>
+      <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
+        <span class="muted" id="totalCreditosLabel">Total créditos acumulados: —</span>
+        <button class="btn" id="downloadConsolidadoBtn" type="button" disabled>Descargar registro unificado</button>
+        <span class="muted" id="consolidadoState">—</span>
+      </div>
+      <div class="table-wrap">
+        <table id="tablaRegistros" class="table">
+          <thead>
+            <tr>
+              <th>Correlativo</th>
+              <th>Fecha</th>
+              <th>Actividad</th>
+              <th>Horas</th>
+              <th>Créditos</th>
+              <th>Constancia</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL ADMIN -->
+  <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
+    <div class="modal-content" role="document">
+      <header class="modal-header">
+        <h3 id="adminTitle">Panel de Administrador</h3>
+        <button class="iconbtn" id="closeAdmin" type="button">✕</button>
+      </header>
+
+      <!-- Login administrador local por PIN -->
+      <div id="adminAuth">
+        <p>Ingrese contraseña de administrador (PIN local):</p>
+        <input type="password" id="adminPass" placeholder="•••••" />
+        <div class="actions">
+          <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+        </div>
+
+        <hr />
+
+        <!-- Superadmin por correo/clave -->
+        <h4>Entrar como superadmin</h4>
+        <p class="muted">Necesita un usuario con validación de super administrador registrado en CAEDUC</p>
+        <label>Correo
+          <input type="email" id="superEmail" placeholder="correo@dominio.com" />
+        </label>
+        <label>Contraseña
+          <input type="password" id="superPass" placeholder="********" />
+        </label>
+        <div class="actions">
+          <button class="btn" id="superLogin" type="button">Entrar como superadmin</button>
+          <span class="muted" id="adminState">—</span>
+        </div>
+      </div>
+
+      <!-- Cuerpo admin -->
+      <div id="adminBody" hidden>
+        <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <strong id="adminModeBadge">Modo: Admin local</strong>
+          <input type="text" id="adminSearch" placeholder="Buscar correlativo (CPG-AAAAmm-####)" style="flex:1;min-width:240px" />
+          <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
+          <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
+
+          <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
+            <input type="checkbox" id="showDeleted" />
+            <span>Mostrar eliminados</span>
+          </label>
+
+          <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
+          <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
+          <span class="muted" id="exportStatus">—</span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" id="adminTable">
+            <thead>
+              <tr>
+                <th>Correlativo</th>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Colegiado</th>
+                <th>Activo</th>
+                <th>Actividad</th>
+                <th>Institución</th>
+                <th>Tipo</th>
+                <th>Fecha</th>
+                <th>Horas</th>
+                <th>Créditos</th>
+                <th>Archivo</th>
+                <th>Hash</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Gestión de usuarios (solo superadmin) -->
+        <div id="userAdminPanel" class="card" style="margin-top:14px" hidden>
+          <h4 style="margin:0 0 10px">Gestión de activación de usuarios</h4>
+          <p class="muted" style="margin:0 0 10px">
+            Esta sección requiere una <strong>Supabase Edge Function</strong> (server-side) para reenviar o activar cuentas sin exponer credenciales.
+            El código del frontend ya está preparado para invocarla.
+          </p>
+          <label>Correo del usuario
+            <input type="email" id="userAdminEmail" placeholder="usuario@dominio.com" />
+          </label>
+          <div class="actions" style="gap:8px; flex-wrap:wrap">
+            <button class="btn" id="userResendBtn" type="button">Reenviar verificación</button>
+            <button class="btn warn" id="userActivateBtn" type="button">Activar manualmente</button>
+            <span class="muted" id="userAdminState">—</span>
+          </div>
+        </div>
+
+        <p class="muted" id="diagBox">—</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE AUTENTICACIÓN -->
+  <div class="modal" id="authModal" aria-hidden="true" role="dialog">
+    <div class="modal-content" role="document">
+      <header class="modal-header">
+        <h3>Acceder</h3>
+        <button class="iconbtn" id="closeAuth" type="button">✕</button>
+      </header>
+      <div style="padding:12px">
+        <label>Email
+          <input type="email" id="authEmail" placeholder="correo@dominio.com" autocomplete="email" autocapitalize="off" />
+        </label>
+        <label>Contraseña
+          <input type="password" id="authPass" placeholder="********" autocomplete="current-password" />
+        </label>
+        <div class="actions" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="doLogin" type="button">Entrar</button>
+          <button class="btn" id="doSignup" type="button">Crear cuenta</button>
+          <button class="btn" id="doResetPassword" type="button">¿Olvidaste tu contraseña?</button>
+          <span class="muted" id="authState">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE ENTRADA (debe aceptar para continuar) -->
+  <div class="modal" id="entryModal" aria-hidden="true" role="dialog">
+    <div class="modal-content" role="document">
+      <header class="modal-header">
+        <h3>Antes de continuar</h3>
+      </header>
+      <div style="padding:12px;line-height:1.45">
+        <p><strong>Para registrar constancias o gestionar las que ya tienes</strong> debes crear una cuenta o iniciar sesión con tu usuario existente.</p>
+        <p>Al continuar, aceptas que tus datos se almacenarán para generar correlativos y emitir constancias conforme al Art. 16 (1 crédito = 16 horas).</p>
+        <p>De acuerdo con el principio 3.1.1 de código de ética Los psicólogos representan digna y adecuadamente su profesión. Evidencian una conducta honesta, proba, no participan en actividades ilícitas, engaño, fraude o tergiversación de información, discurso y/o hechos.</p>
+      </div>
+      <div class="actions" style="padding:12px">
+        <button class="btn primary" id="entryAccept" type="button">Acepto y continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <footer class="foot">
+    <small>© 2025 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
+  </footer>
+</body>
+</html>
