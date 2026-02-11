@@ -73,11 +73,6 @@ function sbErrMsg(err){ return err?.message || err?.hint || err?.code || 'Error 
 
 /* =======================================================
    Prefill datos personales (último registro + localStorage)
-   Objetivo:
-   - El usuario llena Nombre/Teléfono/Colegiado una sola vez.
-   - Cada nuevo registro mantiene esos campos prellenados.
-   - Se recuerdan aunque cierre el navegador (localStorage).
-   - Si cambia de dispositivo, se recupera del último registro en Supabase.
 ======================================================= */
 function lsKey(userId, field) {
   return `creditos2025:${userId}:${field}`;
@@ -123,7 +118,6 @@ async function precargarDatosDesdeUltimoRegistro(userId) {
   const sb = getSupabaseClient();
   if(!sb || !userId) return;
 
-  // Ajustado a tus columnas reales (según tu insert): nombre, telefono, colegiado_numero
   const { data, error } = await sb
     .from("registros")
     .select("nombre, telefono, colegiado_numero")
@@ -153,6 +147,7 @@ async function precargarDatosDesdeUltimoRegistro(userId) {
 
   guardarDatosRapidos(userId, nombre, telefono, colegiadoNumero);
 }
+
 /* =======================================================
    DOM refs
 ======================================================= */
@@ -195,12 +190,18 @@ const superLogin = document.getElementById('superLogin');
 const adminState = document.getElementById('adminState');
 const diagBox = document.getElementById('diagBox');
 
-// Superadmin user management (Edge Function)
+// Superadmin: activación de usuarios
 const userAdminPanel = document.getElementById('userAdminPanel');
 const userAdminEmail = document.getElementById('userAdminEmail');
-const userResendBtn = document.getElementById('userResendBtn');
+const userCheckBtn = document.getElementById('userCheckBtn');
 const userActivateBtn = document.getElementById('userActivateBtn');
 const userAdminState = document.getElementById('userAdminState');
+
+// Superadmin: gestión de roles
+const adminRoleEmail = document.getElementById('adminRoleEmail');
+const makeAdminBtn = document.getElementById('makeAdminBtn');
+const removeAdminBtn = document.getElementById('removeAdminBtn');
+const adminRoleState = document.getElementById('adminRoleState');
 
 // Auth modal
 const authBtn = document.getElementById('authBtn');
@@ -225,7 +226,6 @@ const entryAccept = document.getElementById('entryAccept');
   if(fechaEl) fechaEl.max = now.toISOString().slice(0,10);
   try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
 
-  // Splash/entrada: debe aceptar para continuar
   if (!localStorage.getItem('entryAccepted')) {
     openModal(entryModal);
   }
@@ -239,7 +239,7 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
-/* Detección de deleted_at (si la columna no existe, desactiva mostrar eliminados) */
+/* Detección de deleted_at */
 (async function detectDeletedAt(){
   const sb = getSupabaseClient(); if(!sb) return;
   try {
@@ -313,14 +313,12 @@ function handleFile(file){
 function openModal(m){ m?.setAttribute('aria-hidden','false'); }
 function closeModal(m){ m?.setAttribute('aria-hidden','true'); if(authState) authState.textContent='—'; }
 
-
 authBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
 
   const { data: s } = await sb.auth.getSession();
 
-  // Con sesión activa: cerrar sesión
   if (s?.session?.user) {
     const ok = confirm('¿Deseas cerrar sesión en este dispositivo?');
     if(!ok) return;
@@ -329,10 +327,8 @@ authBtn?.addEventListener('click', async ()=>{
     const { error } = await sb.auth.signOut();
     if(error){ showToast('No se pudo cerrar sesión: ' + sbErrMsg(error), 'error'); return; }
 
-    // Para uso compartido: limpiamos datos guardados del usuario saliente
     limpiarDatosRapidos(userId);
 
-    // Limpieza visual
     try { form?.reset(); } catch {}
     if(preview) preview.innerHTML='';
     if(creditosEl) creditosEl.value='';
@@ -346,7 +342,6 @@ authBtn?.addEventListener('click', async ()=>{
     return;
   }
 
-  // Sin sesión: abrir modal de autenticación
   openModal(authModal);
 });
 
@@ -397,7 +392,6 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
 /* =======================================================
    Datos (vista usuario)
 ======================================================= */
-
 async function loadAndRender(){
   const sb = getSupabaseClient();
   if(!sb) return;
@@ -413,7 +407,6 @@ async function loadAndRender(){
 
   const userId = session.session.user.id;
 
-  // Precarga: primero localStorage (rápido), luego último registro (cross-device)
   try { precargarDesdeLocalStorage(userId); } catch {}
   try { await precargarDatosDesdeUltimoRegistro(userId); } catch {}
 
@@ -492,7 +485,6 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
     if (consolidadoState) consolidadoState.textContent = 'Generando consolidado...';
     const { doc, blob, filename } = await generarConsolidadoPDF(rows);
 
-    // Subir/actualizar en Storage (ruta fija)
     const path = `consolidados/${userId}/registro_unificado_creditos.pdf`;
     const { error: upErr } = await sb.storage.from('comprobantes').upload(path, blob, { contentType: 'application/pdf', upsert: true });
     if(upErr){
@@ -503,7 +495,6 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
       if (consolidadoState) consolidadoState.textContent = 'Consolidado actualizado.';
     }
 
-    // Descargar localmente
     doc.save(filename);
   } catch (e) {
     console.error(e);
@@ -584,20 +575,16 @@ form?.addEventListener('submit', async (e)=>{
   const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
   if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
 
-  // Guardar datos personales para próximos registros
   guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
 
-  // Generar PDF con el comprobante recién adjuntado
   await generarConstanciaPDF(inserted, fileRef).catch(()=> showToast('Error al generar PDF','error'));
   showToast('Registro guardado y constancia generada.');
 
   form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
-  // Mantener campos personales prellenados tras registrar
   try { precargarDesdeLocalStorage(user.id); } catch {}
   fileRef = null; markUploaderError(false);
   await loadAndRender();
 
-  // Actualizar consolidado automáticamente (sin descarga) tras cada nuevo registro
   try {
     await actualizarConsolidadoEnStorage(user.id, __USER_ROWS_CACHE);
   } catch (e) {
@@ -662,42 +649,74 @@ superLogin?.addEventListener('click', async ()=>{
   showToast('Sesión superadmin iniciada','ok');
 });
 
-// --- Gestión de usuarios (superadmin) vía Edge Function ---
-async function callAdminUserFunction(action, email){
-  const sb = getSupabaseClient(); if(!sb) throw new Error('Supabase no disponible');
-  const cleanEmail = (email||'').trim();
-  if(!cleanEmail) throw new Error('Ingrese un correo');
+/* --- Gestión de usuarios y roles (funciones SQL vía sb.rpc) --- */
 
-  // La Edge Function debe existir en Supabase: /functions/v1/admin-users
-  // Debe validar que el usuario autenticado es superadmin y usar Service Role del lado del servidor.
-  const { data, error } = await sb.functions.invoke('admin-users', { body: { action, email: cleanEmail } });
-  if(error) throw error;
-  return data;
-}
-
-userResendBtn?.addEventListener('click', async ()=>{
+userCheckBtn?.addEventListener('click', async ()=>{
   if(!isSuperAdmin){ showToast('Solo superadmin puede usar esta opción.', 'warn'); return; }
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const email = (userAdminEmail?.value||'').trim();
+  if(!email){ showToast('Ingresa el correo del usuario.', 'warn'); return; }
   try {
-    if(userAdminState) userAdminState.textContent = 'Enviando...';
-    const data = await callAdminUserFunction('resend', userAdminEmail?.value);
-    if(userAdminState) userAdminState.textContent = data?.message || 'Solicitud enviada.';
+    if(userAdminState) userAdminState.textContent = 'Consultando...';
+    const { data, error } = await sb.rpc('check_user_status', { target_email: email });
+    if(error){ if(userAdminState) userAdminState.textContent = 'Error: ' + sbErrMsg(error); return; }
+    if(userAdminState) userAdminState.textContent = data?.message || JSON.stringify(data);
   } catch (e) {
-    if(userAdminState) userAdminState.textContent = 'Error: ' + sbErrMsg(e);
-    showToast('No se pudo reenviar (requiere Edge Function): ' + sbErrMsg(e), 'error');
+    if(userAdminState) userAdminState.textContent = 'Error: ' + (e?.message || e);
   }
 });
 
 userActivateBtn?.addEventListener('click', async ()=>{
   if(!isSuperAdmin){ showToast('Solo superadmin puede usar esta opción.', 'warn'); return; }
-  const ok = confirm('¿Activar manualmente este usuario? Esta acción debe estar autorizada por la política institucional.');
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const email = (userAdminEmail?.value||'').trim();
+  if(!email){ showToast('Ingresa el correo del usuario.', 'warn'); return; }
+  const ok = confirm('¿Activar la cuenta de ' + email + '?\nEsta acción confirma su correo sin necesidad de verificación.');
   if(!ok) return;
   try {
     if(userAdminState) userAdminState.textContent = 'Activando...';
-    const data = await callAdminUserFunction('activate', userAdminEmail?.value);
+    const { data, error } = await sb.rpc('activate_user_by_email', { target_email: email });
+    if(error){ if(userAdminState) userAdminState.textContent = 'Error: ' + sbErrMsg(error); return; }
     if(userAdminState) userAdminState.textContent = data?.message || 'Usuario activado.';
+    if(data?.success) showToast(data.message, 'ok');
   } catch (e) {
-    if(userAdminState) userAdminState.textContent = 'Error: ' + sbErrMsg(e);
-    showToast('No se pudo activar (requiere Edge Function): ' + sbErrMsg(e), 'error');
+    if(userAdminState) userAdminState.textContent = 'Error: ' + (e?.message || e);
+  }
+});
+
+makeAdminBtn?.addEventListener('click', async ()=>{
+  if(!isSuperAdmin){ showToast('Solo superadmin puede usar esta opción.', 'warn'); return; }
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const email = (adminRoleEmail?.value||'').trim();
+  if(!email){ showToast('Ingresa el correo del usuario.', 'warn'); return; }
+  const ok = confirm('¿Asignar permisos de superadmin a ' + email + '?\n\nEsta persona podrá ver todos los registros, exportar datos y gestionar usuarios.');
+  if(!ok) return;
+  try {
+    if(adminRoleState) adminRoleState.textContent = 'Procesando...';
+    const { data, error } = await sb.rpc('make_user_admin', { target_email: email });
+    if(error){ if(adminRoleState) adminRoleState.textContent = 'Error: ' + sbErrMsg(error); return; }
+    if(adminRoleState) adminRoleState.textContent = data?.message || 'Superadmin asignado.';
+    if(data?.success) showToast(data.message, 'ok');
+  } catch (e) {
+    if(adminRoleState) adminRoleState.textContent = 'Error: ' + (e?.message || e);
+  }
+});
+
+removeAdminBtn?.addEventListener('click', async ()=>{
+  if(!isSuperAdmin){ showToast('Solo superadmin puede usar esta opción.', 'warn'); return; }
+  const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
+  const email = (adminRoleEmail?.value||'').trim();
+  if(!email){ showToast('Ingresa el correo del usuario.', 'warn'); return; }
+  const ok = confirm('¿Quitar permisos de superadmin a ' + email + '?\n\nEsta persona ya no podrá acceder al panel de administración.');
+  if(!ok) return;
+  try {
+    if(adminRoleState) adminRoleState.textContent = 'Procesando...';
+    const { data, error } = await sb.rpc('remove_user_admin', { target_email: email });
+    if(error){ if(adminRoleState) adminRoleState.textContent = 'Error: ' + sbErrMsg(error); return; }
+    if(adminRoleState) adminRoleState.textContent = data?.message || 'Permisos removidos.';
+    if(data?.success) showToast(data.message, 'ok');
+  } catch (e) {
+    if(adminRoleState) adminRoleState.textContent = 'Error: ' + (e?.message || e);
   }
 });
 
@@ -850,7 +869,7 @@ async function downloadComprobante(path){
 }
 
 /* =======================================================
-   Helpers: obtener imagen del comprobante (imagen o 1a página de PDF)
+   Helpers: obtener imagen del comprobante
 ======================================================= */
 function blobToDataURL(blob){
   return new Promise((resolve)=>{
@@ -941,7 +960,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   const pad = 48;
 
-  // Cabecera
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Constancia de Registro de Créditos Académicos', pad, 64);
 
@@ -967,7 +985,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
   for (const ln of lines) { doc.text(String(ln), pad, y); y += lineH; }
   if (rec.observaciones) { doc.text(`Observaciones: ${rec.observaciones}`, pad, y); y += lineH; }
 
-  // QR y URL
   try {
     const verifyUrl = `${location.origin}/verificar.html?c=${encodeURIComponent(rec.correlativo)}&h=${encodeURIComponent(rec.hash)}`;
     const qrDataUrl = await getQrDataUrl(verifyUrl, QR_SIZE);
@@ -979,7 +996,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
     }
   } catch (err) { console.warn('QR no pudo generarse:', err); }
 
-  // Logo debajo del QR
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) {
@@ -988,7 +1004,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
     }
   } catch (e) { console.warn('No se pudo insertar logo en PDF:', e); }
 
-  // ---------- Comprobante adjunto (nueva página) ----------
   try {
     let evidDataUrl = null;
     if (localFileBlob) {
@@ -1006,7 +1021,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
       const usableW = pageW - pad*2;
       const topY = pad + 12;
 
-      // Para conocer proporción, creamos una imagen temporal
       const tmpImg = new Image();
       const loaded = new Promise(res => { tmpImg.onload = res; tmpImg.onerror = res; });
       tmpImg.src = evidDataUrl; await loaded;
@@ -1031,7 +1045,6 @@ async function generarConstanciaPDF(rec, localFileBlob){
     console.warn('No se pudo incrustar comprobante:', e);
   }
 
-  // Pie
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
@@ -1039,7 +1052,7 @@ async function generarConstanciaPDF(rec, localFileBlob){
 }
 
 /* =======================================================
-   PDF consolidado: Registro unificado de créditos
+   PDF consolidado
 ======================================================= */
 function baseName(path){
   const p = String(path || '').split('?')[0];
@@ -1062,19 +1075,16 @@ async function generarConsolidadoPDF(rows){
   const totalCred = (rows||[]).reduce((acc, r)=> acc + (Number(r.creditos) || 0), 0);
   const totalCredRounded = Math.round(totalCred*100)/100;
 
-  // Encabezado
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('Registro unificado de Créditos Académicos', pad, 56);
   doc.setFont('helvetica','normal'); doc.setFontSize(11);
   doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 74);
 
-  // Logo (opcional)
   try {
     const logo = await ensurePdfLogoDataUrl();
     if (logo) doc.addImage(logo, 'PNG', pageW - pad - 64, 24, 64, 64);
   } catch {}
 
-  // Datos del agremiado
   const nombre = last.nombre || '—';
   const colegiado = (last.colegiado_numero ?? last.colegiadoNumero) || '—';
   const activo = (last.colegiado_activo ?? last.colegiadoActivo) || '—';
@@ -1086,7 +1096,6 @@ async function generarConsolidadoPDF(rows){
   doc.text(`Colegiado No.: ${colegiado} (Activo: ${activo})`, pad, 140);
   doc.text(`Fecha de emisión: ${new Date().toISOString().slice(0,10)}`, pad, 156);
 
-  // Tabla
   let y = 186;
   const rowH = 18;
   const col = {
@@ -1124,7 +1133,6 @@ async function generarConsolidadoPDF(rows){
     const creditos = (Math.round((Number(r.creditos)||0)*100)/100).toString();
     const docName = r.archivo_url ? baseName(r.archivo_url) : '—';
 
-    // Truncado simple para mantener una fila por registro
     const cut = (t, n)=> t.length>n ? (t.slice(0, n-1)+'…') : t;
     doc.text(cut(actividad, 38), col.act, y);
     doc.text(cut(institucion, 28), col.inst, y);
@@ -1134,7 +1142,6 @@ async function generarConsolidadoPDF(rows){
     y += rowH;
   }
 
-  // Total
   y += 10;
   doc.setLineWidth(0.8);
   doc.line(pad, y, pageW-pad, y);
@@ -1142,7 +1149,6 @@ async function generarConsolidadoPDF(rows){
   doc.setFont('helvetica','bold'); doc.setFontSize(12);
   doc.text(`Total de créditos acumulados: ${totalCredRounded}`, pad, y);
 
-  // Pie
   doc.setFont('helvetica','normal'); doc.setFontSize(10);
   doc.setTextColor(120);
   doc.text('Este documento se actualiza cada vez que se registra una nueva actividad.', pad, pageH - 48);
@@ -1196,7 +1202,6 @@ async function getQrDataUrl(text, size=96){
     resolve(null);
   });
 }
-
 
 /* =======================================================
    Carga inicial
