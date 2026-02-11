@@ -30,7 +30,7 @@
   </script>
 
   <!-- App -->
-  <script src="./script.js?v=18" defer></script>
+  <script src="./script.js?v=19" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -63,8 +63,8 @@
             <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
           </label>
 
-          <label>Número de colegiado*
-            <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" />
+          <label>Número de colegiado* (solo números)
+            <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" inputmode="numeric" pattern="\d*" placeholder="Ej: 4661" />
           </label>
 
           <label>¿Colegiado activo?*
@@ -134,6 +134,11 @@
       <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
         <span class="muted" id="totalCreditosLabel">Total créditos acumulados: —</span>
         <button class="btn" id="downloadConsolidadoBtn" type="button" disabled>Descargar registro unificado</button>
+        <button class="btn" id="downloadByYearBtn" type="button" disabled>Registro por año</button>
+        <select id="yearSelect" style="display:none;min-width:100px" disabled>
+          <option value="">— Año —</option>
+        </select>
+        <button class="btn" id="downloadYearBtn" type="button" style="display:none">Descargar</button>
         <span class="muted" id="consolidadoState">—</span>
       </div>
       <div class="table-wrap">
@@ -145,7 +150,7 @@
               <th>Actividad</th>
               <th>Horas</th>
               <th>Créditos</th>
-              <th>Constancia</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody></tbody>
