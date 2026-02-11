@@ -30,7 +30,7 @@
   </script>
 
   <!-- App -->
-  <script src="./script.js?v=17" defer></script>
+  <script src="./script.js?v=18" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -232,18 +232,32 @@
 
         <!-- Gestión de usuarios (solo superadmin) -->
         <div id="userAdminPanel" class="card" style="margin-top:14px" hidden>
-          <h4 style="margin:0 0 10px">Gestión de activación de usuarios</h4>
+          <h4 style="margin:0 0 10px">Activar cuentas de usuarios</h4>
           <p class="muted" style="margin:0 0 10px">
-            Esta sección requiere una <strong>Supabase Edge Function</strong> (server-side) para reenviar o activar cuentas sin exponer credenciales.
-            El código del frontend ya está preparado para invocarla.
+            Si un usuario no recibió su correo de verificación, puedes verificar su estado o activar su cuenta directamente.
           </p>
           <label>Correo del usuario
             <input type="email" id="userAdminEmail" placeholder="usuario@dominio.com" />
           </label>
           <div class="actions" style="gap:8px; flex-wrap:wrap">
-            <button class="btn" id="userResendBtn" type="button">Reenviar verificación</button>
-            <button class="btn warn" id="userActivateBtn" type="button">Activar manualmente</button>
+            <button class="btn" id="userCheckBtn" type="button">Verificar estado</button>
+            <button class="btn warn" id="userActivateBtn" type="button">Activar cuenta sin correo</button>
             <span class="muted" id="userAdminState">—</span>
+          </div>
+
+          <hr style="border-color:var(--border);margin:18px 0" />
+
+          <h4 style="margin:0 0 10px">Gestión de superadministradores</h4>
+          <p class="muted" style="margin:0 0 10px">
+            Asigna o quita permisos de superadmin a otros usuarios registrados.
+          </p>
+          <label>Correo del usuario
+            <input type="email" id="adminRoleEmail" placeholder="usuario@dominio.com" />
+          </label>
+          <div class="actions" style="gap:8px; flex-wrap:wrap">
+            <button class="btn primary" id="makeAdminBtn" type="button">Asignar superadmin</button>
+            <button class="btn warn" id="removeAdminBtn" type="button">Quitar superadmin</button>
+            <span class="muted" id="adminRoleState">—</span>
           </div>
         </div>
 
