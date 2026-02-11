@@ -36,11 +36,10 @@ const LOGO_BELOW_GAP = 12;
 let __PDF_LOGO_DATAURL = null;
 let __HAS_DELETED_AT = true;
 
-// Cache de registros del usuario (para consolidado)
 let __USER_ROWS_CACHE = [];
 let __CONSOLIDADO_PATH = null;
 
-/* PDF.js worker (si está disponible) */
+/* PDF.js worker */
 window.addEventListener('load', ()=>{
   if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
     window.pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -72,7 +71,7 @@ function sbErrMsg(err){ return err?.message || err?.hint || err?.code || 'Error 
 
 
 /* =======================================================
-   Prefill datos personales (último registro + localStorage)
+   Prefill datos personales
 ======================================================= */
 function lsKey(userId, field) {
   return `creditos2025:${userId}:${field}`;
@@ -125,10 +124,7 @@ async function precargarDatosDesdeUltimoRegistro(userId) {
     .order("created_at", { ascending: false })
     .limit(1);
 
-  if (error) {
-    console.warn("No se pudo precargar desde el último registro:", error.message);
-    return;
-  }
+  if (error) { console.warn("No se pudo precargar:", error.message); return; }
 
   const last = data?.[0];
   if (!last) return;
@@ -157,9 +153,13 @@ const creditosEl = document.getElementById('creditos');
 const tablaBody = document.querySelector('#tablaRegistros tbody');
 const totalCreditosLabel = document.getElementById('totalCreditosLabel');
 const downloadConsolidadoBtn = document.getElementById('downloadConsolidadoBtn');
+const downloadByYearBtn = document.getElementById('downloadByYearBtn');
+const yearSelect = document.getElementById('yearSelect');
+const downloadYearBtn = document.getElementById('downloadYearBtn');
 const consolidadoState = document.getElementById('consolidadoState');
 const obsEl = document.getElementById('observaciones');
 const fechaEl = document.getElementById('fecha');
+const colegiadoEl = document.getElementById('colegiadoNumero');
 
 const upZone = document.getElementById('uploader');
 const fileInput = document.getElementById('archivo');
@@ -239,6 +239,29 @@ if (horasEl && creditosEl) {
   horasEl.addEventListener('input', ()=> creditosEl.value = calcCreditos(horasEl.value));
 }
 
+/* --- Solo números en campo de colegiado --- */
+if (colegiadoEl) {
+  colegiadoEl.addEventListener('input', ()=>{
+    colegiadoEl.value = colegiadoEl.value.replace(/[^0-9]/g, '');
+  });
+  colegiadoEl.addEventListener('keydown', (e)=>{
+    // Permitir: Backspace, Delete, Tab, Escape, Enter, flechas, Ctrl+A/C/V/X
+    if ([8,9,13,27,46].includes(e.keyCode)) return;
+    if ((e.ctrlKey || e.metaKey) && [65,67,86,88].includes(e.keyCode)) return;
+    if (e.keyCode >= 35 && e.keyCode <= 40) return;
+    // Bloquear si no es número
+    if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
+      e.preventDefault();
+    }
+  });
+  // También limpiar al pegar
+  colegiadoEl.addEventListener('paste', (e)=>{
+    setTimeout(()=>{
+      colegiadoEl.value = colegiadoEl.value.replace(/[^0-9]/g, '');
+    }, 0);
+  });
+}
+
 /* Detección de deleted_at */
 (async function detectDeletedAt(){
   const sb = getSupabaseClient(); if(!sb) return;
@@ -284,14 +307,12 @@ function handleFile(file){
 
   if(!ALLOWED_MIME.includes(file.type)) {
     showToast('Tipo no permitido. Solo PDF/JPG/PNG.', 'error');
-    markUploaderError(true);
-    return;
+    markUploaderError(true); return;
   }
   const mb=file.size/1024/1024;
   if(mb>MAX_FILE_MB){
     showToast('Archivo supera 10 MB.', 'error');
-    markUploaderError(true);
-    return;
+    markUploaderError(true); return;
   }
   fileRef=file; markUploaderError(false);
 
@@ -335,6 +356,8 @@ authBtn?.addEventListener('click', async ()=>{
     if(tablaBody) tablaBody.innerHTML='';
     if(totalCreditosLabel) totalCreditosLabel.textContent = 'Total créditos acumulados: 0';
     if(downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = true;
+    if(downloadByYearBtn) downloadByYearBtn.disabled = true;
+    hideYearSelector();
     if(consolidadoState) consolidadoState.textContent = '—';
 
     showToast('Sesión cerrada.');
@@ -401,6 +424,8 @@ async function loadAndRender(){
     if(tablaBody) tablaBody.innerHTML='';
     if(totalCreditosLabel) totalCreditosLabel.textContent = 'Total créditos acumulados: 0';
     if(downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = true;
+    if(downloadByYearBtn) downloadByYearBtn.disabled = true;
+    hideYearSelector();
     if(consolidadoState) consolidadoState.textContent = '—';
     return;
   }
@@ -423,6 +448,7 @@ async function loadAndRender(){
   const rows = data || [];
   __USER_ROWS_CACHE = rows;
   updateUserTotalsUI(rows);
+  populateYearSelect(rows);
   renderTabla(rows);
 }
 
@@ -431,8 +457,89 @@ function updateUserTotalsUI(rows){
   if (totalCreditosLabel) totalCreditosLabel.textContent = `Total créditos acumulados: ${Math.round(totalCred*100)/100}`;
   const enabled = (rows && rows.length > 0);
   if (downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = !enabled;
-  if (!enabled && consolidadoState) consolidadoState.textContent = '—';
+  if (downloadByYearBtn) downloadByYearBtn.disabled = !enabled;
+  if (!enabled) {
+    hideYearSelector();
+    if (consolidadoState) consolidadoState.textContent = '—';
+  }
 }
+
+/* --- Selector de año para reportes --- */
+function getYearsFromRows(rows) {
+  const years = new Set();
+  for (const r of (rows || [])) {
+    const fecha = r.fecha || r.created_at || '';
+    const y = new Date(fecha).getFullYear();
+    if (y && !isNaN(y)) years.add(y);
+  }
+  return [...years].sort((a, b) => b - a); // más reciente primero
+}
+
+function populateYearSelect(rows) {
+  if (!yearSelect) return;
+  const years = getYearsFromRows(rows);
+  yearSelect.innerHTML = '<option value="">— Año —</option>';
+  for (const y of years) {
+    const opt = document.createElement('option');
+    opt.value = y;
+    opt.textContent = y;
+    yearSelect.appendChild(opt);
+  }
+  if (years.length > 0) {
+    yearSelect.disabled = false;
+  } else {
+    yearSelect.disabled = true;
+  }
+}
+
+function hideYearSelector() {
+  if (yearSelect) { yearSelect.style.display = 'none'; yearSelect.value = ''; }
+  if (downloadYearBtn) downloadYearBtn.style.display = 'none';
+}
+
+function showYearSelector() {
+  if (yearSelect) yearSelect.style.display = '';
+  if (downloadYearBtn) downloadYearBtn.style.display = '';
+}
+
+downloadByYearBtn?.addEventListener('click', ()=>{
+  if (yearSelect?.style.display === 'none' || yearSelect?.style.display === '') {
+    // Toggle: si está oculto, mostrar; si visible, ocultar
+    if (yearSelect?.style.display === 'none') {
+      showYearSelector();
+    } else {
+      hideYearSelector();
+    }
+  } else {
+    hideYearSelector();
+  }
+});
+
+downloadYearBtn?.addEventListener('click', async ()=>{
+  const selectedYear = yearSelect?.value;
+  if (!selectedYear) { showToast('Selecciona un año.', 'warn'); return; }
+
+  const yearRows = (__USER_ROWS_CACHE || []).filter(r => {
+    const fecha = r.fecha || r.created_at || '';
+    return new Date(fecha).getFullYear() === Number(selectedYear);
+  });
+
+  if (!yearRows.length) {
+    showToast('No hay registros para el año ' + selectedYear, 'warn');
+    return;
+  }
+
+  try {
+    if (consolidadoState) consolidadoState.textContent = 'Generando reporte ' + selectedYear + '...';
+    const { doc, blob, filename } = await generarConsolidadoPDF(yearRows, selectedYear);
+    doc.save(filename);
+    if (consolidadoState) consolidadoState.textContent = 'Reporte ' + selectedYear + ' descargado.';
+  } catch (e) {
+    console.error(e);
+    if (consolidadoState) consolidadoState.textContent = 'Error.';
+    showToast('No se pudo generar el reporte: ' + (e?.message || e), 'error');
+  }
+});
 
 function renderTabla(rows){
   if(!tablaBody) return;
@@ -449,6 +556,7 @@ function renderTabla(rows){
       <td>
         <button class="btn" data-id="${r.id}" data-action="pdf" type="button">PDF</button>
         ${compBtn}
+        <button class="btn warn" data-id="${r.id}" data-corr="${sanitize(r.correlativo)}" data-action="userdel" type="button">Borrar</button>
       </td>`;
     tablaBody.appendChild(tr);
   }
@@ -470,6 +578,25 @@ tablaBody?.addEventListener('click', async (e)=>{
   if (act === 'dl') {
     const path = btn.getAttribute('data-path');
     await downloadComprobante(path);
+  }
+
+  if (act === 'userdel') {
+    const corr = btn.getAttribute('data-corr') || '—';
+    const id = btn.getAttribute('data-id');
+    const ok = confirm(`¿Deseas eliminar el registro ${corr}?\n\nEsta acción no se puede deshacer.`);
+    if(!ok) return;
+
+    if (__HAS_DELETED_AT) {
+      const { error: upErr } = await sb.from('registros').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+      if(upErr){ showToast('No se pudo eliminar: '+sbErrMsg(upErr),'error'); return; }
+    } else {
+      // Sin soft delete: eliminar físicamente (solo si no hay deleted_at)
+      const { error: delErr } = await sb.from('registros').delete().eq('id', id);
+      if(delErr){ showToast('No se pudo eliminar: '+sbErrMsg(delErr),'error'); return; }
+    }
+
+    showToast('Registro ' + corr + ' eliminado.');
+    await loadAndRender();
   }
 });
 
@@ -529,6 +656,9 @@ form?.addEventListener('submit', async (e)=>{
 
   if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
     showToast('Complete todos los campos obligatorios (*), incluido el número de colegiado.', 'error'); return;
+  }
+  if (!/^\d+$/.test(colegiadoNumero)) {
+    showToast('El número de colegiado solo debe contener números.', 'error'); return;
   }
   if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
   if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
@@ -806,7 +936,7 @@ document.getElementById('adminTable')?.addEventListener('click', async (e)=>{
     const corr = btn.getAttribute('data-corr') || '—';
     const ok = confirm(`¿Eliminar (soft delete) el registro con correlativo ${corr}?`);
     if(!ok) return;
-    const patch = __HAS_DELETED_AT ? { deleted_at: new Date().toISOString() } : { /* sin deleted_at */ };
+    const patch = __HAS_DELETED_AT ? { deleted_at: new Date().toISOString() } : {};
     const { error: upErr } = await sb.from('registros').update(patch).eq('id', id);
     if(upErr){ console.error(upErr); showToast('No se pudo eliminar (RLS): '+sbErrMsg(upErr),'error'); return; }
     showToast('Registro marcado como eliminado.');
@@ -1052,7 +1182,7 @@ async function generarConstanciaPDF(rec, localFileBlob){
 }
 
 /* =======================================================
-   PDF consolidado
+   PDF consolidado (acepta filtro por año opcional)
 ======================================================= */
 function baseName(path){
   const p = String(path || '').split('?')[0];
@@ -1060,7 +1190,7 @@ function baseName(path){
   return parts[parts.length-1] || '—';
 }
 
-async function generarConsolidadoPDF(rows){
+async function generarConsolidadoPDF(rows, yearFilter){
   if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('jsPDF missing');
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
@@ -1075,8 +1205,10 @@ async function generarConsolidadoPDF(rows){
   const totalCred = (rows||[]).reduce((acc, r)=> acc + (Number(r.creditos) || 0), 0);
   const totalCredRounded = Math.round(totalCred*100)/100;
 
+  const titleSuffix = yearFilter ? ` — Año ${yearFilter}` : '';
+
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('Registro unificado de Créditos Académicos', pad, 56);
+  doc.text('Registro unificado de Créditos Académicos' + titleSuffix, pad, 56);
   doc.setFont('helvetica','normal'); doc.setFontSize(11);
   doc.text('Colegio de Psicólogos de Guatemala — Artículo 16: 1 crédito = 16 horas', pad, 74);
 
@@ -1147,13 +1279,14 @@ async function generarConsolidadoPDF(rows){
   doc.line(pad, y, pageW-pad, y);
   y += 18;
   doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text(`Total de créditos acumulados: ${totalCredRounded}`, pad, y);
+  doc.text(`Total de créditos acumulados${titleSuffix}: ${totalCredRounded}`, pad, y);
 
   doc.setFont('helvetica','normal'); doc.setFontSize(10);
   doc.setTextColor(120);
   doc.text('Este documento se actualiza cada vez que se registra una nueva actividad.', pad, pageH - 48);
 
-  const filename = `Registro_Unificado_Creditos_${String(colegiado).replace(/[^0-9A-Za-z_-]/g,'') || 'CPG'}_${new Date().toISOString().slice(0,10)}.pdf`;
+  const yearTag = yearFilter ? `_${yearFilter}` : '';
+  const filename = `Registro_Unificado_Creditos${yearTag}_${String(colegiado).replace(/[^0-9A-Za-z_-]/g,'') || 'CPG'}_${new Date().toISOString().slice(0,10)}.pdf`;
   const blob = doc.output('blob');
   return { doc, blob, filename };
 }
