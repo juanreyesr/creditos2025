@@ -10,7 +10,7 @@
   <style>.modal{display:none}</style>
 
   <!-- Tu CSS -->
-  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="stylesheet" href="./styles.css?v=3" />
   <link rel="icon" href="data:,">
 
   <!-- Librerías -->
@@ -30,7 +30,7 @@
   </script>
 
   <!-- App -->
-  <script src="./script.js?v=19" defer></script>
+  <script src="./script.js?v=20" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -40,16 +40,38 @@
       <img src="./assets/Logo-cpg.png" alt="Colegio de Psicólogos de Guatemala" class="logo-img" />
       <h1>Registro de Créditos Académicos</h1>
     </div>
-    <nav class="top-actions" style="display:flex; gap:8px; align-items:center">
-      <a class="btn" href="https://youtu.be/zitwRCdNgQc" target="_blank" rel="noopener">Guía de uso</a>
-      <a class="btn" href="./verificar.html">Verificar constancia</a>
+    <!-- Nav oculto hasta que acepten el modal de entrada -->
+    <nav class="top-actions" id="mainNav" style="display:none">
+      <a class="btn nav-btn" href="https://youtu.be/zitwRCdNgQc" target="_blank" rel="noopener">
+        <span class="nav-icon">📖</span> Guía de uso
+      </a>
+      <a class="btn nav-btn" href="./verificar.html">
+        <span class="nav-icon">🔍</span> Verificar constancia
+      </a>
       <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
-      <button class="btn" id="authBtn" type="button">Iniciar sesión</button>
+      <button class="btn nav-btn primary-nav" id="authBtn" type="button">
+        <span class="nav-icon">🔐</span> Iniciar sesión
+      </button>
     </nav>
   </header>
 
   <main class="container">
-    <section class="card" aria-labelledby="formTitle">
+
+    <!-- Sección: requiere login (visible cuando no está autenticado) -->
+    <section class="card login-required-card" id="loginRequiredSection" style="display:none">
+      <div class="login-required-content">
+        <div class="login-required-icon">🔒</div>
+        <h2>Inicia sesión para continuar</h2>
+        <p>Para registrar actividades científico-académicas y gestionar tus créditos, necesitas una cuenta activa.</p>
+        <div class="login-required-actions">
+          <button class="btn primary large-btn" id="loginRequiredBtn" type="button">Iniciar sesión</button>
+          <p class="muted" style="margin-top:8px">¿No tienes cuenta? Podrás crearla desde el formulario de inicio de sesión.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sección: formulario (visible solo cuando está autenticado) -->
+    <section class="card" id="formSection" style="display:none" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
       <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
 
@@ -129,7 +151,8 @@
       </form>
     </section>
 
-    <section class="card" aria-labelledby="histTitle">
+    <!-- Sección: historial (visible solo cuando está autenticado) -->
+    <section class="card" id="histSection" style="display:none" aria-labelledby="histTitle">
       <h2 id="histTitle">Mis registros (sesión actual)</h2>
       <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
         <span class="muted" id="totalCreditosLabel">Total créditos acumulados: —</span>
@@ -273,41 +296,45 @@
 
   <!-- MODAL DE AUTENTICACIÓN -->
   <div class="modal" id="authModal" aria-hidden="true" role="dialog">
-    <div class="modal-content" role="document">
+    <div class="modal-content modal-auth-content" role="document">
       <header class="modal-header">
         <h3>Acceder</h3>
         <button class="iconbtn" id="closeAuth" type="button">✕</button>
       </header>
-      <div style="padding:12px">
+      <div style="padding:16px 20px">
         <label>Email
           <input type="email" id="authEmail" placeholder="correo@dominio.com" autocomplete="email" autocapitalize="off" />
         </label>
         <label>Contraseña
           <input type="password" id="authPass" placeholder="********" autocomplete="current-password" />
         </label>
-        <div class="actions" style="margin-top:10px;gap:8px;flex-wrap:wrap">
+        <div class="actions" style="margin-top:14px;gap:8px;flex-wrap:wrap">
           <button class="btn primary" id="doLogin" type="button">Entrar</button>
           <button class="btn" id="doSignup" type="button">Crear cuenta</button>
-          <button class="btn" id="doResetPassword" type="button">¿Olvidaste tu contraseña?</button>
-          <span class="muted" id="authState">—</span>
+          <button class="btn text-btn" id="doResetPassword" type="button">¿Olvidaste tu contraseña?</button>
         </div>
+        <span class="muted" id="authState" style="display:block;margin-top:10px">—</span>
       </div>
     </div>
   </div>
 
-  <!-- MODAL DE ENTRADA (debe aceptar para continuar) -->
+  <!-- MODAL DE ENTRADA (obligatorio cada vez) -->
   <div class="modal" id="entryModal" aria-hidden="true" role="dialog">
-    <div class="modal-content" role="document">
-      <header class="modal-header">
-        <h3>Antes de continuar</h3>
-      </header>
-      <div style="padding:12px;line-height:1.45">
-        <p><strong>Para registrar constancias o gestionar las que ya tienes</strong> debes crear una cuenta o iniciar sesión con tu usuario existente.</p>
-        <p>Al continuar, aceptas que tus datos se almacenarán para generar correlativos y emitir constancias conforme al Art. 16 (1 crédito = 16 horas).</p>
-        <p>De acuerdo con el principio 3.1.1 de código de ética Los psicólogos representan digna y adecuadamente su profesión. Evidencian una conducta honesta, proba, no participan en actividades ilícitas, engaño, fraude o tergiversación de información, discurso y/o hechos.</p>
-      </div>
-      <div class="actions" style="padding:12px">
-        <button class="btn primary" id="entryAccept" type="button">Acepto y continuar</button>
+    <div class="modal-content modal-entry-content" role="document">
+      <div class="entry-modal-body">
+        <div class="entry-logo-wrap">
+          <img src="./assets/Logo-cpg.png" alt="CPG" class="entry-logo" />
+        </div>
+        <h2 class="entry-title">Bienvenido al Registro de Créditos Académicos</h2>
+        <p class="entry-subtitle">Colegio de Psicólogos de Guatemala</p>
+
+        <div class="entry-info">
+          <p><strong>Para registrar constancias o gestionar las que ya tienes</strong>, debes crear una cuenta o iniciar sesión con tu usuario existente.</p>
+          <p>Al continuar, aceptas que tus datos se almacenarán para generar correlativos y emitir constancias conforme al Art. 16 (1 crédito = 16 horas).</p>
+          <p class="entry-ethics">De acuerdo con el principio 3.1.1 del código de ética: Los psicólogos representan digna y adecuadamente su profesión. Evidencian una conducta honesta, proba, no participan en actividades ilícitas, engaño, fraude o tergiversación de información, discurso y/o hechos.</p>
+        </div>
+
+        <button class="btn primary large-btn entry-accept-btn" id="entryAccept" type="button">Acepto y continuar</button>
       </div>
     </div>
   </div>
