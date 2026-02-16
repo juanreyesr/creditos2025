@@ -89,16 +89,26 @@
           </label>
 
           <label>Número de colegiado* (solo números)
-            <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" inputmode="numeric" pattern="\d*" placeholder="Ej: 0061" />
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" inputmode="numeric" pattern="\d*" placeholder="Ej: 4661" style="flex:1" />
+              <button type="button" class="btn primary" id="verificarColegiadoBtn" style="white-space:nowrap;padding:10px 16px">Verificar</button>
+            </div>
           </label>
 
           <label>¿Colegiado activo?*
-            <select name="colegiadoActivo" id="colegiadoActivo" required>
-              <option value="">— Seleccione —</option>
-              <option value="Sí">Sí</option>
-              <option value="No">No</option>
-            </select>
+            <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required
+              placeholder="Se llena automáticamente al verificar"
+              style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
+            <input type="hidden" id="colegiadoActivoHidden" name="colegiadoActivoValue" />
           </label>
+        </div>
+
+        <!-- Info del colegiado verificado -->
+        <div id="colegiadoInfo" class="colegiado-info" style="display:none">
+          <div id="colegiadoInfoContent"></div>
+        </div>
+
+        <div class="grid">
 
           <label>Nombre de la actividad*
             <input type="text" name="actividad" id="actividad" required maxlength="140" />
