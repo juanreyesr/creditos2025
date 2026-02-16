@@ -416,8 +416,8 @@ function aplicarResultadoVerificacion(numero, data, fromCache) {
   if(colegiadoActivoHidden) colegiadoActivoHidden.value = isActivo ? 'Sí' : 'No';
   __COLEGIADO_VERIFIED = true;
 
-  // Auto-fill nombre
-  if(data.nombre && nombreEl && !nombreEl.value) {
+  // Auto-fill nombre from CPG (authoritative source, always overwrite)
+  if(data.nombre && nombreEl) {
     nombreEl.value = data.nombre;
   }
 
