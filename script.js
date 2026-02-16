@@ -227,6 +227,7 @@ const formSection = document.getElementById('formSection');
 const histSection = document.getElementById('histSection');
 const loginRequiredSection = document.getElementById('loginRequiredSection');
 const loginRequiredBtn = document.getElementById('loginRequiredBtn');
+const signupRequiredBtn = document.getElementById('signupRequiredBtn');
 
 /* =======================================================
    UI State Management
@@ -316,6 +317,16 @@ entryAccept?.addEventListener('click', async ()=>{
 /* Botón "Iniciar sesión" dentro de la sección login-required */
 loginRequiredBtn?.addEventListener('click', ()=>{
   openModal(authModal);
+});
+
+/* Botón "Crear cuenta" dentro de la sección login-required */
+signupRequiredBtn?.addEventListener('click', ()=>{
+  openModal(authModal);
+  // Limpiar campos y poner foco en email para crear cuenta
+  if(authEmail) authEmail.value = '';
+  if(authPass2) authPass2.value = '';
+  if(authState) authState.textContent = 'Completa los campos y presiona "Crear cuenta"';
+  setTimeout(()=> authEmail?.focus(), 150);
 });
 
 if (horasEl && creditosEl) {
