@@ -113,6 +113,7 @@ function limpiarDatosRapidos(userId) {
     localStorage.removeItem(lsKey(userId, "nombre"));
     localStorage.removeItem(lsKey(userId, "telefono"));
     localStorage.removeItem(lsKey(userId, "colegiadoNumero"));
+    localStorage.removeItem('cpg_colegiado_verificado');
   } catch {}
 }
 
@@ -247,6 +248,8 @@ function showAuthenticatedUI(){
   if(formSection) formSection.style.display = '';
   if(histSection) histSection.style.display = '';
   if(loginRequiredSection) loginRequiredSection.style.display = 'none';
+  // Restore cached colegiado verification if available
+  setTimeout(()=>{ try { restaurarVerificacionCacheada(); } catch {} }, 100);
 }
 
 function showUnauthenticatedUI(){
@@ -362,8 +365,9 @@ if (colegiadoEl) {
   // Reset verification when number changes
   colegiadoEl.addEventListener('input', ()=>{
     __COLEGIADO_VERIFIED = false;
+    habilitarFormulario(false);
     const activoEl = document.getElementById('colegiadoActivo');
-    if(activoEl) activoEl.value = '';
+    if(activoEl) { activoEl.value = ''; activoEl.style.color = 'var(--muted)'; }
     if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
     if(colegiadoInfoDiv){
       colegiadoInfoDiv.style.display = 'none';
@@ -375,6 +379,72 @@ if (colegiadoEl) {
 /* =======================================================
    Verificación automática de colegiado (CPG)
 ======================================================= */
+const datosPersonalesFs = document.getElementById('datosPersonalesFieldset');
+const actividadFs = document.getElementById('actividadFieldset');
+
+function habilitarFormulario(habilitar) {
+  if(datosPersonalesFs) datosPersonalesFs.disabled = !habilitar;
+  if(actividadFs) actividadFs.disabled = !habilitar;
+}
+
+function guardarVerificacionLocal(numero, data) {
+  try {
+    const payload = { numero, nombre: data.nombre||'', estatus: data.estatus||'', fecha_colegiacion: data.fecha_colegiacion||'', ultimo_pago: data.ultimo_pago||'', ts: Date.now() };
+    localStorage.setItem('cpg_colegiado_verificado', JSON.stringify(payload));
+  } catch {}
+}
+
+function obtenerVerificacionLocal() {
+  try {
+    const raw = localStorage.getItem('cpg_colegiado_verificado');
+    if(!raw) return null;
+    const d = JSON.parse(raw);
+    // Cache valid for 24 hours
+    if(Date.now() - d.ts > 24*60*60*1000) { localStorage.removeItem('cpg_colegiado_verificado'); return null; }
+    return d;
+  } catch { return null; }
+}
+
+function aplicarResultadoVerificacion(numero, data, fromCache) {
+  const activoEl = document.getElementById('colegiadoActivo');
+  const nombreEl = document.getElementById('nombre');
+  const estatus = (data.estatus || '').toUpperCase();
+  const isActivo = estatus === 'ACTIVO';
+
+  // Set readonly fields
+  if(activoEl) { activoEl.value = isActivo ? 'Sí' : 'No'; activoEl.style.color = isActivo ? '#4ade80' : '#fca5a5'; }
+  if(colegiadoActivoHidden) colegiadoActivoHidden.value = isActivo ? 'Sí' : 'No';
+  __COLEGIADO_VERIFIED = true;
+
+  // Auto-fill nombre
+  if(data.nombre && nombreEl && !nombreEl.value) {
+    nombreEl.value = data.nombre;
+  }
+
+  // Enable the rest of the form
+  habilitarFormulario(true);
+
+  // Style the info div
+  if(colegiadoInfoDiv) { colegiadoInfoDiv.style.display = 'block'; colegiadoInfoDiv.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`; }
+
+  // Build info HTML
+  let html = `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">`;
+  html += `<strong>Colegiado No. ${sanitize(data.numero || numero)}</strong>`;
+  html += `<span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${sanitize(estatus)}</span>`;
+  if(fromCache) html += `<span style="font-size:11px;color:var(--muted)">(verificación en caché)</span>`;
+  html += `</div>`;
+
+  if(data.nombre) html += `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>`;
+  if(data.fecha_colegiacion) html += `<div class="info-row"><span class="info-label">Fecha colegiación:</span><span class="info-value">${sanitize(data.fecha_colegiacion)}</span></div>`;
+  if(data.ultimo_pago) html += `<div class="info-row"><span class="info-label">Último pago:</span><span class="info-value">${sanitize(data.ultimo_pago)}</span></div>`;
+
+  if(!isActivo){
+    html += `<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como <strong>INACTIVO</strong> en la base del Colegio. Si crees que es un error, contacta al CPG.</p>`;
+  }
+
+  if(colegiadoInfoContent) colegiadoInfoContent.innerHTML = html;
+}
+
 async function verificarColegiado(numero) {
   if (!numero || !/^\d+$/.test(numero)) {
     showToast('Ingresa un número de colegiado válido.', 'warn');
@@ -401,6 +471,7 @@ async function verificarColegiado(numero) {
 
     if (!res.ok || data.error) {
       __COLEGIADO_VERIFIED = false;
+      habilitarFormulario(false);
       if(activoEl) activoEl.value = '';
       if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
       if(colegiadoInfoDiv) colegiadoInfoDiv.className = 'colegiado-info status-error';
@@ -410,36 +481,13 @@ async function verificarColegiado(numero) {
       return;
     }
 
-    const estatus = (data.estatus || '').toUpperCase();
-    const isActivo = estatus === 'ACTIVO';
-
-    // Set the readonly field
-    if(activoEl) activoEl.value = isActivo ? 'Sí' : 'No';
-    if(colegiadoActivoHidden) colegiadoActivoHidden.value = isActivo ? 'Sí' : 'No';
-    __COLEGIADO_VERIFIED = true;
-
-    // Style the info div
-    if(colegiadoInfoDiv) colegiadoInfoDiv.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`;
-
-    // Build info HTML
-    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">`;
-    html += `<strong>Colegiado No. ${sanitize(data.numero || numero)}</strong>`;
-    html += `<span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${sanitize(estatus)}</span>`;
-    html += `</div>`;
-
-    if(data.nombre) html += `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>`;
-    if(data.fecha_colegiacion) html += `<div class="info-row"><span class="info-label">Fecha colegiación:</span><span class="info-value">${sanitize(data.fecha_colegiacion)}</span></div>`;
-    if(data.ultimo_pago) html += `<div class="info-row"><span class="info-label">Último pago:</span><span class="info-value">${sanitize(data.ultimo_pago)}</span></div>`;
-
-    if(!isActivo){
-      html += `<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como <strong>INACTIVO</strong> en la base del Colegio. Si crees que es un error, contacta al CPG.</p>`;
-    }
-
-    if(colegiadoInfoContent) colegiadoInfoContent.innerHTML = html;
+    aplicarResultadoVerificacion(numero, data, false);
+    guardarVerificacionLocal(numero, data);
 
   } catch (e) {
     console.error('Error verificando colegiado:', e);
     __COLEGIADO_VERIFIED = false;
+    habilitarFormulario(false);
     if(activoEl) activoEl.value = '';
     if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
     if(colegiadoInfoDiv) colegiadoInfoDiv.className = 'colegiado-info status-error';
@@ -449,6 +497,17 @@ async function verificarColegiado(numero) {
   } finally {
     if(btn) { btn.disabled = false; btn.textContent = 'Verificar'; }
   }
+}
+
+// Restore cached verification on page load
+function restaurarVerificacionCacheada() {
+  const cached = obtenerVerificacionLocal();
+  if(!cached) return;
+  const currentVal = (colegiadoEl?.value || '').trim();
+  // Only restore if field is empty or matches cached number
+  if(currentVal && currentVal !== cached.numero) return;
+  if(colegiadoEl && !currentVal) colegiadoEl.value = cached.numero;
+  aplicarResultadoVerificacion(cached.numero, cached, true);
 }
 
 verificarColegiadoBtn?.addEventListener('click', ()=>{
@@ -932,6 +991,8 @@ form?.addEventListener('submit', async (e)=>{
 
   form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
   try { precargarDesdeLocalStorage(user.id); } catch {}
+  // Re-apply cached verification so fieldsets stay enabled for next registration
+  try { restaurarVerificacionCacheada(); } catch {}
   fileRef = null; markUploaderError(false);
   await loadAndRender();
 
