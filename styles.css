@@ -218,6 +218,23 @@ textarea{resize:vertical}
 @keyframes pop{from{transform:translateY(6px);opacity:0}to{transform:translateY(0);opacity:1}}
 
 /* ===== COLEGIADO VERIFICATION ===== */
+.verification-fieldset, .form-fieldset{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:18px 20px 14px;
+  margin:0 0 16px;
+  transition:opacity .3s, border-color .3s;
+}
+.verification-fieldset{border-color:var(--primary)}
+.form-fieldset[disabled]{opacity:.45;pointer-events:none}
+.form-fieldset:not([disabled]){opacity:1;border-color:var(--border)}
+.verification-fieldset legend, .form-fieldset legend{
+  font-size:14px;
+  font-weight:700;
+  color:var(--primary);
+  padding:0 8px;
+  letter-spacing:.3px;
+}
 .colegiado-info{
   background:#0c1430;
   border:1px solid var(--border);
