@@ -857,30 +857,46 @@ superLogin?.addEventListener('click', async ()=>{
   const pass = (superPass?.value||'').trim();
   if(!email || !pass){ adminState.textContent = 'Escribe correo y contraseña'; return; }
 
-  const { data: s } = await sb.auth.getSession();
-  if(!s?.session){
-    const { error } = await sb.auth.signInWithPassword({ email, password: pass });
-    if(error){ adminState.textContent = 'Error al iniciar sesión: '+sbErrMsg(error); return; }
+  try {
+    // Siempre intentar login con las credenciales proporcionadas
+    const { error: loginErr } = await sb.auth.signInWithPassword({ email, password: pass });
+    if(loginErr){
+      adminState.textContent = 'Contraseña o correo incorrectos.';
+      return;
+    }
+
+    const { data: me, error: uErr } = await sb.auth.getUser();
+    if(uErr || !me?.user){
+      adminState.textContent = 'Error obteniendo usuario: ' + (uErr ? sbErrMsg(uErr) : 'sin sesión');
+      return;
+    }
+
+    const { data: perfil, error: pErr } = await sb
+      .from('perfiles')
+      .select('is_admin')
+      .eq('user_id', me.user.id)
+      .maybeSingle();
+
+    if(pErr){
+      adminState.textContent = 'Error leyendo perfil: ' + sbErrMsg(pErr);
+      return;
+    }
+    if(!perfil?.is_admin){
+      adminState.textContent = 'No tienes permisos de superadmin';
+      return;
+    }
+
+    adminAuth.hidden = true; adminBody.hidden = false; isSuperAdmin = true; updateAdminBadge();
+    currentAdminFilter = null;
+    await renderAdmin();
+    adminState.textContent = 'OK (superadmin)';
+    showToast('Sesión superadmin iniciada','ok');
+
+    // Actualizar botón de auth ya que se inició sesión
+    updateAuthButton(true);
+  } catch (e) {
+    adminState.textContent = 'Error: ' + (e?.message || 'desconocido');
   }
-
-  const { data: me, error: uErr } = await sb.auth.getUser();
-  if(uErr){ adminState.textContent = 'Error obteniendo usuario: '+sbErrMsg(uErr); return; }
-  if(!me?.user){ adminState.textContent = 'No hay sesión activa'; return; }
-
-  const { data: perfil, error: pErr } = await sb
-    .from('perfiles')
-    .select('is_admin')
-    .eq('user_id', me.user.id)
-    .maybeSingle();
-
-  if(pErr){ adminState.textContent = 'Error leyendo perfil: '+sbErrMsg(pErr); return; }
-  if(!perfil?.is_admin){ adminState.textContent = 'No tienes permisos de superadmin'; return; }
-
-  adminAuth.hidden = true; adminBody.hidden = false; isSuperAdmin = true; updateAdminBadge();
-  currentAdminFilter = null;
-  await renderAdmin();
-  adminState.textContent = 'OK (superadmin)';
-  showToast('Sesión superadmin iniciada','ok');
 });
 
 /* --- Gestión de usuarios y roles --- */
