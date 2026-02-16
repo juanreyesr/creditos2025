@@ -39,6 +39,9 @@ let __HAS_DELETED_AT = true;
 let __USER_ROWS_CACHE = [];
 let __CONSOLIDADO_PATH = null;
 
+/* Indica si el usuario ya aceptó el modal de entrada en esta visita */
+let __ENTRY_ACCEPTED = false;
+
 /* PDF.js worker */
 window.addEventListener('load', ()=>{
   if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
@@ -208,7 +211,7 @@ const authBtn = document.getElementById('authBtn');
 const authModal = document.getElementById('authModal');
 const closeAuth = document.getElementById('closeAuth');
 const authEmail = document.getElementById('authEmail');
-const authPass = document.getElementById('authPass');
+const authPass2 = document.getElementById('authPass');
 const doLogin = document.getElementById('doLogin');
 const doSignup = document.getElementById('doSignup');
 const doResetPassword = document.getElementById('doResetPassword');
@@ -218,21 +221,101 @@ const authState = document.getElementById('authState');
 const entryModal = document.getElementById('entryModal');
 const entryAccept = document.getElementById('entryAccept');
 
+// Secciones condicionales
+const mainNav = document.getElementById('mainNav');
+const formSection = document.getElementById('formSection');
+const histSection = document.getElementById('histSection');
+const loginRequiredSection = document.getElementById('loginRequiredSection');
+const loginRequiredBtn = document.getElementById('loginRequiredBtn');
+
+/* =======================================================
+   UI State Management
+   - Controla qué se muestra según: modal aceptado + sesión
+======================================================= */
+function showNav(){ if(mainNav) mainNav.style.display = 'flex'; }
+function hideNav(){ if(mainNav) mainNav.style.display = 'none'; }
+
+function showAuthenticatedUI(){
+  if(formSection) formSection.style.display = '';
+  if(histSection) histSection.style.display = '';
+  if(loginRequiredSection) loginRequiredSection.style.display = 'none';
+}
+
+function showUnauthenticatedUI(){
+  if(formSection) formSection.style.display = 'none';
+  if(histSection) histSection.style.display = 'none';
+  if(loginRequiredSection) loginRequiredSection.style.display = '';
+}
+
+function hideAllContent(){
+  if(formSection) formSection.style.display = 'none';
+  if(histSection) histSection.style.display = 'none';
+  if(loginRequiredSection) loginRequiredSection.style.display = 'none';
+}
+
+function updateAuthButton(isLoggedIn){
+  if(!authBtn) return;
+  if(isLoggedIn){
+    authBtn.innerHTML = '<span class="nav-icon">👤</span> Mi sesión';
+    authBtn.classList.add('session-active-btn');
+    authBtn.classList.remove('primary-nav');
+  } else {
+    authBtn.innerHTML = '<span class="nav-icon">🔐</span> Iniciar sesión';
+    authBtn.classList.remove('session-active-btn');
+    authBtn.classList.add('primary-nav');
+  }
+}
+
+/** Aplica el estado correcto de la UI basado en sesión */
+async function applyUIState(){
+  if(!__ENTRY_ACCEPTED){
+    hideNav();
+    hideAllContent();
+    return;
+  }
+
+  showNav();
+
+  const sb = getSupabaseClient();
+  if(!sb){ showUnauthenticatedUI(); updateAuthButton(false); return; }
+
+  const { data: s } = await sb.auth.getSession();
+  const isLoggedIn = !!s?.session?.user;
+
+  updateAuthButton(isLoggedIn);
+
+  if(isLoggedIn){
+    showAuthenticatedUI();
+    await loadAndRender();
+  } else {
+    showUnauthenticatedUI();
+  }
+}
+
 /* =======================================================
    Inicialización UI + detecciones
 ======================================================= */
 (function(){
-  const now=new Date();
+  const now = new Date();
   if(fechaEl) fechaEl.max = now.toISOString().slice(0,10);
   try { adminModal?.setAttribute('aria-hidden','true'); authModal?.setAttribute('aria-hidden','true'); } catch {}
 
-  if (!localStorage.getItem('entryAccepted')) {
-    openModal(entryModal);
-  }
+  // SIEMPRE mostrar el modal de entrada (cada visita)
+  hideNav();
+  hideAllContent();
+  openModal(entryModal);
 })();
-entryAccept?.addEventListener('click', ()=>{
-  localStorage.setItem('entryAccepted','1');
+
+/* Aceptar modal de entrada */
+entryAccept?.addEventListener('click', async ()=>{
+  __ENTRY_ACCEPTED = true;
   closeModal(entryModal);
+  await applyUIState();
+});
+
+/* Botón "Iniciar sesión" dentro de la sección login-required */
+loginRequiredBtn?.addEventListener('click', ()=>{
+  openModal(authModal);
 });
 
 if (horasEl && creditosEl) {
@@ -245,16 +328,13 @@ if (colegiadoEl) {
     colegiadoEl.value = colegiadoEl.value.replace(/[^0-9]/g, '');
   });
   colegiadoEl.addEventListener('keydown', (e)=>{
-    // Permitir: Backspace, Delete, Tab, Escape, Enter, flechas, Ctrl+A/C/V/X
     if ([8,9,13,27,46].includes(e.keyCode)) return;
     if ((e.ctrlKey || e.metaKey) && [65,67,86,88].includes(e.keyCode)) return;
     if (e.keyCode >= 35 && e.keyCode <= 40) return;
-    // Bloquear si no es número
     if ((e.shiftKey || (e.keyCode < 48 || e.keyCode > 57)) && (e.keyCode < 96 || e.keyCode > 105)) {
       e.preventDefault();
     }
   });
-  // También limpiar al pegar
   colegiadoEl.addEventListener('paste', (e)=>{
     setTimeout(()=>{
       colegiadoEl.value = colegiadoEl.value.replace(/[^0-9]/g, '');
@@ -361,7 +441,8 @@ authBtn?.addEventListener('click', async ()=>{
     if(consolidadoState) consolidadoState.textContent = '—';
 
     showToast('Sesión cerrada.');
-    if(authBtn) authBtn.textContent = 'Iniciar sesión';
+    updateAuthButton(false);
+    showUnauthenticatedUI();
     return;
   }
 
@@ -369,14 +450,14 @@ authBtn?.addEventListener('click', async ()=>{
 });
 
 closeAuth?.addEventListener('click', ()=> closeModal(authModal));
-authPass?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
+authPass2?.addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin?.click(); });
 
 doSignup?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('Supabase no disponible.', 'error'); return; }
   authState.textContent = 'Creando cuenta...';
   const email = (authEmail?.value||'').trim();
-  const password = authPass?.value || '';
+  const password = authPass2?.value || '';
   const redirectTo = `${location.origin}/auth-callback.html`;
   const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
   if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
@@ -389,11 +470,13 @@ doLogin?.addEventListener('click', async ()=>{
   authState.textContent = 'Ingresando...';
   const { error } = await sb.auth.signInWithPassword({
     email: (authEmail?.value||'').trim(),
-    password: authPass?.value || ''
+    password: authPass2?.value || ''
   });
   if(error){ authState.textContent='Error: '+sbErrMsg(error); return; }
   authState.textContent='OK';
   closeModal(authModal);
+  updateAuthButton(true);
+  showAuthenticatedUI();
   await loadAndRender();
 });
 
@@ -408,8 +491,20 @@ doResetPassword?.addEventListener('click', async ()=>{
   authState.textContent = 'Te enviamos un enlace para restablecer tu contraseña.';
 });
 
+/* Listener de cambio de estado de auth (sesión persistente) */
 getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
-  if(authBtn) authBtn.textContent = session?.user ? 'Mi sesión' : 'Iniciar sesión';
+  const isLoggedIn = !!session?.user;
+  updateAuthButton(isLoggedIn);
+
+  // Solo actualizar secciones si ya se aceptó el modal de entrada
+  if(__ENTRY_ACCEPTED){
+    if(isLoggedIn){
+      showAuthenticatedUI();
+      await loadAndRender();
+    } else {
+      showUnauthenticatedUI();
+    }
+  }
 });
 
 /* =======================================================
@@ -472,7 +567,7 @@ function getYearsFromRows(rows) {
     const y = new Date(fecha).getFullYear();
     if (y && !isNaN(y)) years.add(y);
   }
-  return [...years].sort((a, b) => b - a); // más reciente primero
+  return [...years].sort((a, b) => b - a);
 }
 
 function populateYearSelect(rows) {
@@ -504,7 +599,6 @@ function showYearSelector() {
 
 downloadByYearBtn?.addEventListener('click', ()=>{
   if (yearSelect?.style.display === 'none' || yearSelect?.style.display === '') {
-    // Toggle: si está oculto, mostrar; si visible, ocultar
     if (yearSelect?.style.display === 'none') {
       showYearSelector();
     } else {
@@ -590,7 +684,6 @@ tablaBody?.addEventListener('click', async (e)=>{
       const { error: upErr } = await sb.from('registros').update({ deleted_at: new Date().toISOString() }).eq('id', id);
       if(upErr){ showToast('No se pudo eliminar: '+sbErrMsg(upErr),'error'); return; }
     } else {
-      // Sin soft delete: eliminar físicamente (solo si no hay deleted_at)
       const { error: delErr } = await sb.from('registros').delete().eq('id', id);
       if(delErr){ showToast('No se pudo eliminar: '+sbErrMsg(delErr),'error'); return; }
     }
@@ -779,7 +872,7 @@ superLogin?.addEventListener('click', async ()=>{
   showToast('Sesión superadmin iniciada','ok');
 });
 
-/* --- Gestión de usuarios y roles (funciones SQL vía sb.rpc) --- */
+/* --- Gestión de usuarios y roles --- */
 
 userCheckBtn?.addEventListener('click', async ()=>{
   if(!isSuperAdmin){ showToast('Solo superadmin puede usar esta opción.', 'warn'); return; }
@@ -1182,7 +1275,7 @@ async function generarConstanciaPDF(rec, localFileBlob){
 }
 
 /* =======================================================
-   PDF consolidado (acepta filtro por año opcional)
+   PDF consolidado
 ======================================================= */
 function baseName(path){
   const p = String(path || '').split('?')[0];
@@ -1337,16 +1430,15 @@ async function getQrDataUrl(text, size=96){
 }
 
 /* =======================================================
-   Carga inicial
+   Carga inicial — NO usa localStorage para el modal.
+   Siempre muestra el modal de entrada.
+   Si hay sesión activa, después de aceptar va directo al form.
 ======================================================= */
 (async function initAuthButton(){
   const sb = getSupabaseClient();
-  if(!sb){ if(authBtn) authBtn.textContent='Iniciar sesión'; return; }
+  if(!sb){ updateAuthButton(false); return; }
   const { data: s } = await sb.auth.getSession();
-  if(authBtn) authBtn.textContent = s?.session?.user ? 'Cerrar sesión' : 'Iniciar sesión';
-  if (s?.session?.user) {
-    try { precargarDesdeLocalStorage(s.session.user.id); } catch {}
-    try { await precargarDatosDesdeUltimoRegistro(s.session.user.id); } catch {}
-  }
+  const isLoggedIn = !!s?.session?.user;
+  updateAuthButton(isLoggedIn);
+  // No cargamos datos aún — esperamos a que acepten el modal
 })();
-loadAndRender();
