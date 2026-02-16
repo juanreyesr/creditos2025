@@ -910,23 +910,39 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
 let __SUBMITTING = false;
 const submitBtn = form?.querySelector('button[type="submit"]');
 
+function resetSubmitBtn(originalText) {
+  __SUBMITTING = false;
+  if(submitBtn){ submitBtn.disabled = false; submitBtn.innerHTML = originalText || 'Registrar y generar constancia'; }
+}
+
 form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
 
-  // Guard against double-submit
   if(__SUBMITTING) return;
   __SUBMITTING = true;
-  const originalBtnText = submitBtn?.innerHTML || '';
+  const originalBtnText = submitBtn?.innerHTML || 'Registrar y generar constancia';
   if(submitBtn){ submitBtn.disabled = true; submitBtn.innerHTML = '<span class="verifying-spinner"></span> Registrando…'; }
 
+  // Safety timeout: reset button after 45 seconds no matter what
+  const safetyTimer = setTimeout(()=>{
+    console.error('SUBMIT SAFETY TIMEOUT: resetting after 45s');
+    showToast('La operación tardó demasiado. Revisa tu conexión e intenta de nuevo.', 'error');
+    resetSubmitBtn(originalBtnText);
+  }, 45000);
+
   try {
+    console.log('[SUBMIT] 1. Iniciando...');
     const sb = getSupabaseClient();
     if(!sb){ showToast('Supabase no está disponible.', 'error'); return; }
 
-    const { data: s } = await sb.auth.getSession();
+    console.log('[SUBMIT] 2. Obteniendo sesión...');
+    const sessionPromise = sb.auth.getSession();
+    const sessionTimeout = new Promise((_, reject) => setTimeout(()=> reject(new Error('Timeout obteniendo sesión')), 10000));
+    const { data: s } = await Promise.race([sessionPromise, sessionTimeout]);
     if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
     const user = s.session.user;
 
+    console.log('[SUBMIT] 3. Leyendo campos...');
     const nombre = (document.getElementById('nombre')?.value||'').trim();
     const telefono = (document.getElementById('telefono')?.value||'').trim();
     const colegiadoNumero = (document.getElementById('colegiadoNumero')?.value||'').trim();
@@ -937,6 +953,8 @@ form?.addEventListener('submit', async (e)=>{
     const fecha = document.getElementById('fecha')?.value;
     const horas = Number(document.getElementById('horas')?.value);
     const observaciones = (obsEl?.value||'').trim();
+
+    console.log('[SUBMIT] 4. Validando...', { nombre:!!nombre, telefono:!!telefono, colegiadoNumero:!!colegiadoNumero, colegiadoActivo:!!colegiadoActivo, actividad:!!actividad, institucion:!!institucion, tipo:!!tipo, fecha:!!fecha, horas });
 
     if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
       showToast('Complete todos los campos obligatorios (*), incluido la verificación del colegiado.', 'error'); return;
@@ -965,6 +983,7 @@ form?.addEventListener('submit', async (e)=>{
     const sizeMB = fileRef.size/1024/1024;
     if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
 
+    console.log('[SUBMIT] 5. Obteniendo correlativo...');
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Obteniendo correlativo…';
     const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
     if(corrErr || !corrData){ showToast('No se pudo obtener correlativo: '+(corrErr?sbErrMsg(corrErr):''), 'error'); return; }
@@ -973,6 +992,7 @@ form?.addEventListener('submit', async (e)=>{
     const creditos = calcCreditos(horas);
     const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
 
+    console.log('[SUBMIT] 6. Subiendo comprobante...');
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Subiendo comprobante…';
     let archivo_url = null, archivo_mime = null;
     {
@@ -983,6 +1003,7 @@ form?.addEventListener('submit', async (e)=>{
       archivo_url = path; archivo_mime = fileRef.type;
     }
 
+    console.log('[SUBMIT] 7. Insertando registro...');
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Guardando registro…';
     const payload = {
       usuario_id: user.id,
@@ -997,37 +1018,44 @@ form?.addEventListener('submit', async (e)=>{
     const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
     if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
 
+    console.log('[SUBMIT] 8. Registro guardado OK. Generando PDF...');
     guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
 
-    // Generate PDF — non-blocking on mobile
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Generando constancia…';
     try {
-      await generarConstanciaPDF(inserted, fileRef);
+      await Promise.race([
+        generarConstanciaPDF(inserted, fileRef),
+        new Promise((_, reject) => setTimeout(()=> reject(new Error('PDF timeout')), 15000))
+      ]);
     } catch (pdfErr) {
-      console.error('Error generando PDF:', pdfErr);
-      showToast('Registro guardado, pero hubo un problema al generar la constancia. Puedes regenerarla desde el historial.', 'warn');
+      console.error('Error/timeout generando PDF:', pdfErr);
+      showToast('Registro guardado ✅, pero la constancia no pudo generarse. Puedes regenerarla desde el historial.', 'warn');
     }
 
+    console.log('[SUBMIT] 9. Limpiando formulario...');
     showToast('✅ Registro guardado y constancia generada.');
 
     form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
     try { precargarDesdeLocalStorage(user.id); } catch {}
     try { restaurarVerificacionCacheada(); } catch {}
     fileRef = null; markUploaderError(false);
-    await loadAndRender();
+
+    console.log('[SUBMIT] 10. Recargando historial...');
+    await loadAndRender().catch(e => console.warn('Error recargando historial:', e));
 
     try {
       await actualizarConsolidadoEnStorage(user.id, __USER_ROWS_CACHE);
     } catch (e) {
       console.warn('No se pudo actualizar consolidado automáticamente:', e);
     }
+    console.log('[SUBMIT] ✅ Completado.');
 
   } catch (fatalErr) {
     console.error('Error fatal en submit:', fatalErr);
-    showToast('Error inesperado: ' + (fatalErr?.message || 'Intenta de nuevo.'), 'error');
+    showToast('Error: ' + (fatalErr?.message || 'Intenta de nuevo.'), 'error');
   } finally {
-    __SUBMITTING = false;
-    if(submitBtn){ submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText; }
+    clearTimeout(safetyTimer);
+    resetSubmitBtn(originalBtnText);
   }
 });
 
