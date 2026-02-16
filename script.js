@@ -1126,7 +1126,7 @@ form?.addEventListener('submit', async (e)=>{
       archivo_url = path; archivo_mime = fileRef.type;
     }
 
-    console.log('[SUBMIT] 7. Insertando registro...');
+    console.log('[SUBMIT] 7. Insertando registro via XHR...');
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Guardando registro…';
     const payload = {
       usuario_id: user.id,
@@ -1137,10 +1137,77 @@ form?.addEventListener('submit', async (e)=>{
       hash
     };
 
-    const insertPromise = sb.from('registros').insert(payload).select().single();
-    const insertTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout guardando registro. Revisa tu conexión.')), 15000));
-    const { data: inserted, error: insErr } = await Promise.race([insertPromise, insertTimeout]);
-    if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
+    const anonKey = window.SB_KEY || window.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    let inserted = null;
+
+    // Try XHR insert
+    try {
+      inserted = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${window.SB_URL}/rest/v1/registros`, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        xhr.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+        xhr.setRequestHeader('apikey', anonKey);
+        xhr.setRequestHeader('Prefer', 'return=representation');
+
+        xhr.onload = () => {
+          console.log('[SUBMIT] XHR insert status:', xhr.status);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const rows = JSON.parse(xhr.responseText);
+              resolve(Array.isArray(rows) ? rows[0] : rows);
+            } catch { resolve(null); }
+          } else {
+            let msg = 'Error ' + xhr.status;
+            try { const j = JSON.parse(xhr.responseText); msg = j.message || j.details || j.hint || msg; } catch {}
+            reject(new Error(msg));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Error de red'));
+        xhr.ontimeout = () => reject(new Error('Timeout XHR'));
+        xhr.timeout = 30000;
+
+        xhr.send(JSON.stringify(payload));
+      });
+    } catch (xhrErr) {
+      console.warn('[SUBMIT] XHR insert failed:', xhrErr.message, '— checking if record was saved anyway...');
+
+      // Fallback: the record might have been saved even though response timed out
+      // Wait a moment then check
+      if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Verificando…';
+      await new Promise(r => setTimeout(r, 2000));
+
+      try {
+        const checkXhr = await new Promise((resolve, reject) => {
+          const x = new XMLHttpRequest();
+          x.open('GET', `${window.SB_URL}/rest/v1/registros?hash=eq.${encodeURIComponent(hash)}&select=*&limit=1`, true);
+          x.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+          x.setRequestHeader('apikey', anonKey);
+          x.onload = () => {
+            if (x.status >= 200 && x.status < 300) {
+              try { resolve(JSON.parse(x.responseText)); } catch { resolve([]); }
+            } else { resolve([]); }
+          };
+          x.onerror = () => resolve([]);
+          x.ontimeout = () => resolve([]);
+          x.timeout = 10000;
+          x.send();
+        });
+
+        if (checkXhr.length > 0) {
+          console.log('[SUBMIT] Record was saved! Found via hash check.');
+          inserted = checkXhr[0];
+        }
+      } catch (e) {
+        console.error('Fallback check failed:', e);
+      }
+    }
+
+    if(!inserted){
+      showToast('No se pudo confirmar el registro. Revisa "Mis registros" — es posible que se haya guardado.', 'error');
+      await loadAndRender().catch(()=>{});
+      return;
+    }
 
     console.log('[SUBMIT] 8. Registro guardado OK. Generando PDF...');
     guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
