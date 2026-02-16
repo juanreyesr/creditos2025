@@ -170,6 +170,13 @@ const browseBtn = document.getElementById('browseBtn');
 const preview = document.getElementById('preview');
 let fileRef = null;
 
+// Colegiado verification
+const verificarColegiadoBtn = document.getElementById('verificarColegiadoBtn');
+const colegiadoInfoDiv = document.getElementById('colegiadoInfo');
+const colegiadoInfoContent = document.getElementById('colegiadoInfoContent');
+const colegiadoActivoHidden = document.getElementById('colegiadoActivoHidden');
+let __COLEGIADO_VERIFIED = false; // Track if the current number has been verified
+
 // Admin
 const adminModal = document.getElementById('adminModal');
 const openAdminBtn = document.getElementById('openAdminBtn');
@@ -351,7 +358,111 @@ if (colegiadoEl) {
       colegiadoEl.value = colegiadoEl.value.replace(/[^0-9]/g, '');
     }, 0);
   });
+
+  // Reset verification when number changes
+  colegiadoEl.addEventListener('input', ()=>{
+    __COLEGIADO_VERIFIED = false;
+    const activoEl = document.getElementById('colegiadoActivo');
+    if(activoEl) activoEl.value = '';
+    if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
+    if(colegiadoInfoDiv){
+      colegiadoInfoDiv.style.display = 'none';
+      colegiadoInfoDiv.className = 'colegiado-info';
+    }
+  });
 }
+
+/* =======================================================
+   Verificación automática de colegiado (CPG)
+======================================================= */
+async function verificarColegiado(numero) {
+  if (!numero || !/^\d+$/.test(numero)) {
+    showToast('Ingresa un número de colegiado válido.', 'warn');
+    return;
+  }
+
+  const activoEl = document.getElementById('colegiadoActivo');
+  const btn = verificarColegiadoBtn;
+
+  // UI: loading state
+  if(btn) { btn.disabled = true; btn.innerHTML = '<span class="verifying-spinner"></span>Verificando…'; }
+  if(colegiadoInfoDiv) { colegiadoInfoDiv.style.display = 'block'; colegiadoInfoDiv.className = 'colegiado-info'; }
+  if(colegiadoInfoContent) colegiadoInfoContent.innerHTML = '<span class="verifying-spinner"></span> Consultando estado en la base del Colegio de Psicólogos…';
+
+  try {
+    const url = window.SB_URL + '/functions/v1/consultar-colegiado';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: numero })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      __COLEGIADO_VERIFIED = false;
+      if(activoEl) activoEl.value = '';
+      if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
+      if(colegiadoInfoDiv) colegiadoInfoDiv.className = 'colegiado-info status-error';
+      if(colegiadoInfoContent) colegiadoInfoContent.innerHTML =
+        `<strong>⚠️ ${data.error || 'No se pudo verificar'}</strong><br>` +
+        `<span class="muted">Verifica que el número sea correcto e intenta de nuevo.</span>`;
+      return;
+    }
+
+    const estatus = (data.estatus || '').toUpperCase();
+    const isActivo = estatus === 'ACTIVO';
+
+    // Set the readonly field
+    if(activoEl) activoEl.value = isActivo ? 'Sí' : 'No';
+    if(colegiadoActivoHidden) colegiadoActivoHidden.value = isActivo ? 'Sí' : 'No';
+    __COLEGIADO_VERIFIED = true;
+
+    // Style the info div
+    if(colegiadoInfoDiv) colegiadoInfoDiv.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`;
+
+    // Build info HTML
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">`;
+    html += `<strong>Colegiado No. ${sanitize(data.numero || numero)}</strong>`;
+    html += `<span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${sanitize(estatus)}</span>`;
+    html += `</div>`;
+
+    if(data.nombre) html += `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>`;
+    if(data.fecha_colegiacion) html += `<div class="info-row"><span class="info-label">Fecha colegiación:</span><span class="info-value">${sanitize(data.fecha_colegiacion)}</span></div>`;
+    if(data.ultimo_pago) html += `<div class="info-row"><span class="info-label">Último pago:</span><span class="info-value">${sanitize(data.ultimo_pago)}</span></div>`;
+
+    if(!isActivo){
+      html += `<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como <strong>INACTIVO</strong> en la base del Colegio. Si crees que es un error, contacta al CPG.</p>`;
+    }
+
+    if(colegiadoInfoContent) colegiadoInfoContent.innerHTML = html;
+
+  } catch (e) {
+    console.error('Error verificando colegiado:', e);
+    __COLEGIADO_VERIFIED = false;
+    if(activoEl) activoEl.value = '';
+    if(colegiadoActivoHidden) colegiadoActivoHidden.value = '';
+    if(colegiadoInfoDiv) colegiadoInfoDiv.className = 'colegiado-info status-error';
+    if(colegiadoInfoContent) colegiadoInfoContent.innerHTML =
+      `<strong>⚠️ Error de conexión</strong><br>` +
+      `<span class="muted">No se pudo conectar con el servicio. Intenta de nuevo.</span>`;
+  } finally {
+    if(btn) { btn.disabled = false; btn.textContent = 'Verificar'; }
+  }
+}
+
+verificarColegiadoBtn?.addEventListener('click', ()=>{
+  const numero = (colegiadoEl?.value || '').trim();
+  verificarColegiado(numero);
+});
+
+// Also verify on Enter key in the colegiado field
+colegiadoEl?.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){
+    e.preventDefault();
+    verificarColegiadoBtn?.click();
+  }
+});
 
 /* Detección de deleted_at */
 (async function detectDeletedAt(){
@@ -750,7 +861,7 @@ form?.addEventListener('submit', async (e)=>{
   const nombre = (form.nombre?.value||'').trim();
   const telefono = (form.telefono?.value||'').trim();
   const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
-  const colegiadoActivo = form.colegiadoActivo?.value;
+  const colegiadoActivo = (document.getElementById('colegiadoActivo')?.value || '').trim();
   const actividad = (form.actividad?.value||'').trim();
   const institucion = (form.institucion?.value||'').trim();
   const tipo = form.tipo?.value;
@@ -759,7 +870,12 @@ form?.addEventListener('submit', async (e)=>{
   const observaciones = (obsEl?.value||'').trim();
 
   if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
-    showToast('Complete todos los campos obligatorios (*), incluido el número de colegiado.', 'error'); return;
+    showToast('Complete todos los campos obligatorios (*), incluido la verificación del colegiado.', 'error'); return;
+  }
+  if (!__COLEGIADO_VERIFIED) {
+    showToast('Debes verificar tu número de colegiado. Presiona "Verificar".', 'error');
+    try { colegiadoEl?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
+    return;
   }
   if (!/^\d+$/.test(colegiadoNumero)) {
     showToast('El número de colegiado solo debe contener números.', 'error'); return;
