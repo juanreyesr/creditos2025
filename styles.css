@@ -217,6 +217,34 @@ textarea{resize:vertical}
 .toast.show{display:block;animation:pop .2s ease-out}
 @keyframes pop{from{transform:translateY(6px);opacity:0}to{transform:translateY(0);opacity:1}}
 
+/* ===== COLEGIADO VERIFICATION ===== */
+.colegiado-info{
+  background:#0c1430;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:14px 18px;
+  margin:8px 0 12px;
+  font-size:14px;
+  line-height:1.5;
+}
+.colegiado-info.status-activo{border-color:#22543d;background:#0c1a14}
+.colegiado-info.status-inactivo{border-color:#7f1d1d;background:#1a0c0c}
+.colegiado-info.status-error{border-color:#78350f;background:#1a150c}
+.colegiado-info .status-badge{
+  display:inline-block;
+  padding:2px 10px;
+  border-radius:8px;
+  font-weight:700;
+  font-size:13px;
+}
+.colegiado-info .status-badge.activo{background:#166534;color:#4ade80}
+.colegiado-info .status-badge.inactivo{background:#7f1d1d;color:#fca5a5}
+.colegiado-info .info-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.colegiado-info .info-label{color:var(--muted);min-width:140px}
+.colegiado-info .info-value{color:var(--text);font-weight:500}
+.verifying-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;margin-right:6px;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
 /* ===== FOOTER ===== */
 .foot{text-align:center;color:var(--muted);padding:24px 16px}
 
