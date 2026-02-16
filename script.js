@@ -1,6 +1,8 @@
 /* =======================================================
    Supabase init (lazy)
 ======================================================= */
+let __CACHED_SESSION = null; // Cached from onAuthStateChange — no network call needed
+
 function getSupabaseClient() {
   try {
     const hasSDK = !!window.supabase && typeof window.supabase.createClient === 'function';
@@ -15,6 +17,20 @@ function getSupabaseClient() {
     console.error('Error creando Supabase client:', e);
     return null;
   }
+}
+
+/** Get current user instantly from cache, fallback to getSession with timeout */
+async function getCurrentUser() {
+  if (__CACHED_SESSION?.user) return __CACHED_SESSION.user;
+  try {
+    const sb = getSupabaseClient();
+    if (!sb) return null;
+    const { data: s } = await Promise.race([
+      sb.auth.getSession(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('session timeout')), 6000))
+    ]);
+    return s?.session?.user || null;
+  } catch { return null; }
 }
 
 /* =======================================================
@@ -290,8 +306,8 @@ async function applyUIState(){
   const sb = getSupabaseClient();
   if(!sb){ showUnauthenticatedUI(); updateAuthButton(false); return; }
 
-  const { data: s } = await sb.auth.getSession();
-  const isLoggedIn = !!s?.session?.user;
+  const currentUser = await getCurrentUser();
+  const isLoggedIn = !!currentUser;
 
   updateAuthButton(isLoggedIn);
 
@@ -599,13 +615,13 @@ authBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient();
   if(!sb){ showToast('No se pudo inicializar autenticación (Supabase).', 'error'); return; }
 
-  const { data: s } = await sb.auth.getSession();
+  const currentUser = await getCurrentUser();
 
-  if (s?.session?.user) {
+  if (currentUser) {
     const ok = confirm('¿Deseas cerrar sesión en este dispositivo?');
     if(!ok) return;
 
-    const userId = s.session.user.id;
+    const userId = currentUser.id;
     const { error } = await sb.auth.signOut();
     if(error){ showToast('No se pudo cerrar sesión: ' + sbErrMsg(error), 'error'); return; }
 
@@ -674,6 +690,7 @@ doResetPassword?.addEventListener('click', async ()=>{
 
 /* Listener de cambio de estado de auth (sesión persistente) */
 getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session)=>{
+  __CACHED_SESSION = session || null;
   const isLoggedIn = !!session?.user;
   updateAuthButton(isLoggedIn);
 
@@ -695,18 +712,21 @@ async function loadAndRender(){
   const sb = getSupabaseClient();
   if(!sb) return;
 
-  const { data: session } = await sb.auth.getSession();
-  if(!session?.session){
-    if(tablaBody) tablaBody.innerHTML='';
-    if(totalCreditosLabel) totalCreditosLabel.textContent = 'Total créditos acumulados: 0';
-    if(downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = true;
-    if(downloadByYearBtn) downloadByYearBtn.disabled = true;
-    hideYearSelector();
-    if(consolidadoState) consolidadoState.textContent = '—';
-    return;
+  // Use cached session first, fallback to getSession
+  let userId = __CACHED_SESSION?.user?.id;
+  if (!userId) {
+    const { data: session } = await sb.auth.getSession();
+    if(!session?.session){
+      if(tablaBody) tablaBody.innerHTML='';
+      if(totalCreditosLabel) totalCreditosLabel.textContent = 'Total créditos acumulados: 0';
+      if(downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = true;
+      if(downloadByYearBtn) downloadByYearBtn.disabled = true;
+      hideYearSelector();
+      if(consolidadoState) consolidadoState.textContent = '—';
+      return;
+    }
+    userId = session.session.user.id;
   }
-
-  const userId = session.session.user.id;
 
   try { precargarDesdeLocalStorage(userId); } catch {}
   try { await precargarDatosDesdeUltimoRegistro(userId); } catch {}
@@ -876,9 +896,9 @@ tablaBody?.addEventListener('click', async (e)=>{
 
 downloadConsolidadoBtn?.addEventListener('click', async ()=>{
   const sb = getSupabaseClient(); if(!sb){ showToast('Supabase no disponible.','error'); return; }
-  const { data: s } = await sb.auth.getSession();
-  if(!s?.session){ showToast('Inicia sesión para descargar el consolidado.', 'error'); return; }
-  const userId = s.session.user.id;
+  const user = await getCurrentUser();
+  if(!user){ showToast('Inicia sesión para descargar el consolidado.', 'error'); return; }
+  const userId = user.id;
   const rows = __USER_ROWS_CACHE || [];
   if(!rows.length){ showToast('No tienes registros para consolidar.', 'warn'); return; }
 
@@ -935,12 +955,21 @@ form?.addEventListener('submit', async (e)=>{
     const sb = getSupabaseClient();
     if(!sb){ showToast('Supabase no está disponible.', 'error'); return; }
 
-    console.log('[SUBMIT] 2. Obteniendo sesión...');
-    const sessionPromise = sb.auth.getSession();
-    const sessionTimeout = new Promise((_, reject) => setTimeout(()=> reject(new Error('Timeout obteniendo sesión')), 10000));
-    const { data: s } = await Promise.race([sessionPromise, sessionTimeout]);
-    if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
-    const user = s.session.user;
+    console.log('[SUBMIT] 2. Verificando sesión...');
+    // Use cached session from onAuthStateChange — avoids slow network call on mobile
+    let user = __CACHED_SESSION?.user;
+    if (!user) {
+      // Fallback: try getSession with timeout
+      try {
+        const sessionPromise = sb.auth.getSession();
+        const sessionTimeout = new Promise((_, reject) => setTimeout(()=> reject(new Error('Timeout obteniendo sesión')), 8000));
+        const { data: s } = await Promise.race([sessionPromise, sessionTimeout]);
+        user = s?.session?.user;
+      } catch (sessErr) {
+        console.warn('getSession fallback failed:', sessErr);
+      }
+    }
+    if(!user){ showToast('Inicia sesión para registrar.', 'error'); return; }
 
     console.log('[SUBMIT] 3. Leyendo campos...');
     const nombre = (document.getElementById('nombre')?.value||'').trim();
@@ -1734,8 +1763,8 @@ async function getQrDataUrl(text, size=96){
 (async function initAuthButton(){
   const sb = getSupabaseClient();
   if(!sb){ updateAuthButton(false); return; }
-  const { data: s } = await sb.auth.getSession();
-  const isLoggedIn = !!s?.session?.user;
+  const currentUser = await getCurrentUser();
+  const isLoggedIn = !!currentUser;
   updateAuthButton(isLoggedIn);
   // No cargamos datos aún — esperamos a que acepten el modal
 })();
