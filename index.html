@@ -79,15 +79,9 @@
       <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
 
       <form id="registroForm" novalidate>
-        <div class="grid">
-          <label>Nombre completo*
-            <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
-          </label>
-
-          <label>Celular (GT) *
-            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
-          </label>
-
+        <!-- PASO 1: Verificación del colegiado -->
+        <fieldset class="verification-fieldset" id="verificationFieldset">
+          <legend>① Verificación de colegiado</legend>
           <label>Número de colegiado* (solo números)
             <div style="display:flex;gap:8px;align-items:flex-end">
               <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" inputmode="numeric" pattern="\d*" placeholder="Ej: 4661" style="flex:1" />
@@ -95,19 +89,36 @@
             </div>
           </label>
 
-          <label>¿Colegiado activo?*
-            <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required
-              placeholder="Se llena automáticamente al verificar"
-              style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
-            <input type="hidden" id="colegiadoActivoHidden" name="colegiadoActivoValue" />
-          </label>
-        </div>
+          <!-- Info del colegiado verificado -->
+          <div id="colegiadoInfo" class="colegiado-info" style="display:none">
+            <div id="colegiadoInfoContent"></div>
+          </div>
+        </fieldset>
 
-        <!-- Info del colegiado verificado -->
-        <div id="colegiadoInfo" class="colegiado-info" style="display:none">
-          <div id="colegiadoInfoContent"></div>
-        </div>
+        <!-- PASO 2: Datos personales (se habilita tras verificación) -->
+        <fieldset class="form-fieldset" id="datosPersonalesFieldset" disabled>
+          <legend>② Datos personales</legend>
+          <div class="grid">
+            <label>Nombre completo*
+              <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
+            </label>
 
+            <label>Celular (GT) *
+              <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
+            </label>
+
+            <label>¿Colegiado activo?*
+              <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required
+                placeholder="Se llena automáticamente"
+                style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
+              <input type="hidden" id="colegiadoActivoHidden" name="colegiadoActivoValue" />
+            </label>
+          </div>
+        </fieldset>
+
+        <!-- PASO 3: Datos de la actividad -->
+        <fieldset class="form-fieldset" id="actividadFieldset" disabled>
+          <legend>③ Datos de la actividad</legend>
         <div class="grid">
 
           <label>Nombre de la actividad*
@@ -139,6 +150,7 @@
             <input type="text" id="creditos" readonly />
           </label>
         </div>
+        </fieldset>
 
         <label>Observaciones (máx. 250 caracteres)
           <textarea id="observaciones" maxlength="250" rows="3" placeholder="Opcional"></textarea>
