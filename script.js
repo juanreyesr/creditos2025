@@ -577,6 +577,46 @@ upZone?.addEventListener('keydown', (e)=>{
   if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput?.click(); }
 });
 
+/* =======================================================
+   Image compression for mobile uploads
+======================================================= */
+function compressImage(file, maxWidthPx = 1600, quality = 0.75, maxSizeKB = 800) {
+  return new Promise((resolve) => {
+    // Only compress images, not PDFs
+    if (!file.type.startsWith('image/')) { resolve(file); return; }
+    // Skip if already small enough
+    if (file.size / 1024 <= maxSizeKB) { resolve(file); return; }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if (w > maxWidthPx) { h = Math.round(h * (maxWidthPx / w)); w = maxWidthPx; }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(file); return; }
+          const compressed = new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() });
+          const savedPct = Math.round((1 - compressed.size / file.size) * 100);
+          console.log(`[COMPRESS] ${(file.size/1024).toFixed(0)}KB → ${(compressed.size/1024).toFixed(0)}KB (${savedPct}% reducido)`);
+          resolve(compressed);
+        }, 'image/jpeg', quality);
+      } catch (e) {
+        console.warn('Compression failed:', e);
+        resolve(file);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
+
 function handleFile(file){
   if(!preview) return;
   preview.innerHTML=''; fileRef=null;
@@ -591,18 +631,26 @@ function handleFile(file){
     showToast('Archivo supera 10 MB.', 'error');
     markUploaderError(true); return;
   }
-  fileRef=file; markUploaderError(false);
 
-  if(file.type==='application/pdf'){
-    const url=URL.createObjectURL(file);
-    const emb=document.createElement('embed');
-    emb.src=url; emb.type='application/pdf'; emb.className='pdf';
-    preview.appendChild(emb);
-  } else {
-    const img=document.createElement('img');
-    img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(file);
-    preview.appendChild(img);
-  }
+  // Compress images for faster mobile upload
+  compressImage(file).then((compressed) => {
+    fileRef = compressed; markUploaderError(false);
+
+    if(compressed.type==='application/pdf'){
+      const url=URL.createObjectURL(compressed);
+      const emb=document.createElement('embed');
+      emb.src=url; emb.type='application/pdf'; emb.className='pdf';
+      preview.appendChild(emb);
+    } else {
+      const img=document.createElement('img');
+      img.className='thumb'; img.alt='Vista previa'; img.src=URL.createObjectURL(compressed);
+      preview.appendChild(img);
+      if(compressed.size < file.size){
+        const savedKB = Math.round((file.size - compressed.size) / 1024);
+        showToast(`Imagen optimizada (${savedKB}KB reducidos) para subida rápida.`, 'success');
+      }
+    }
+  });
 }
 
 /* =======================================================
@@ -943,12 +991,12 @@ form?.addEventListener('submit', async (e)=>{
   const originalBtnText = submitBtn?.innerHTML || 'Registrar y generar constancia';
   if(submitBtn){ submitBtn.disabled = true; submitBtn.innerHTML = '<span class="verifying-spinner"></span> Registrando…'; }
 
-  // Safety timeout: reset button after 45 seconds no matter what
+  // Safety timeout: reset button after 90 seconds no matter what
   const safetyTimer = setTimeout(()=>{
-    console.error('SUBMIT SAFETY TIMEOUT: resetting after 45s');
+    console.error('SUBMIT SAFETY TIMEOUT: resetting after 90s');
     showToast('La operación tardó demasiado. Revisa tu conexión e intenta de nuevo.', 'error');
     resetSubmitBtn(originalBtnText);
-  }, 45000);
+  }, 90000);
 
   try {
     console.log('[SUBMIT] 1. Iniciando...');
@@ -1036,7 +1084,7 @@ form?.addEventListener('submit', async (e)=>{
       const ts = Date.now();
       const path = `${user.id}/${ts}-${safeName}`;
       const uploadPromise = sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
-      const uploadTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout subiendo archivo. Intenta con un archivo más pequeño.')), 30000));
+      const uploadTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout subiendo archivo. Revisa tu conexión a internet.')), 60000));
       const { error: upErr } = await Promise.race([uploadPromise, uploadTimeout]);
       if(upErr){ showToast('No se pudo subir el archivo: '+sbErrMsg(upErr),'error'); return; }
       archivo_url = path; archivo_mime = fileRef.type;
