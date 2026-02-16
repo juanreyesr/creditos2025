@@ -807,7 +807,7 @@ downloadYearBtn?.addEventListener('click', async ()=>{
   try {
     if (consolidadoState) consolidadoState.textContent = 'Generando reporte ' + selectedYear + '...';
     const { doc, blob, filename } = await generarConsolidadoPDF(yearRows, selectedYear);
-    doc.save(filename);
+    savePdfMobile(doc, filename);
     if (consolidadoState) consolidadoState.textContent = 'Reporte ' + selectedYear + ' descargado.';
   } catch (e) {
     console.error(e);
@@ -896,7 +896,7 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
       if (consolidadoState) consolidadoState.textContent = 'Consolidado actualizado.';
     }
 
-    doc.save(filename);
+    savePdfMobile(doc, filename);
   } catch (e) {
     console.error(e);
     if (consolidadoState) consolidadoState.textContent = 'Error.';
@@ -907,99 +907,127 @@ downloadConsolidadoBtn?.addEventListener('click', async ()=>{
 /* =======================================================
    Submit
 ======================================================= */
+let __SUBMITTING = false;
+const submitBtn = form?.querySelector('button[type="submit"]');
+
 form?.addEventListener('submit', async (e)=>{
   e.preventDefault();
 
-  const sb = getSupabaseClient();
-  if(!sb){ showToast('Supabase no está disponible.', 'error'); return; }
-
-  const { data: s } = await sb.auth.getSession();
-  if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
-  const user = s.session.user;
-
-  const nombre = (form.nombre?.value||'').trim();
-  const telefono = (form.telefono?.value||'').trim();
-  const colegiadoNumero = (form.colegiadoNumero?.value||'').trim();
-  const colegiadoActivo = (document.getElementById('colegiadoActivo')?.value || '').trim();
-  const actividad = (form.actividad?.value||'').trim();
-  const institucion = (form.institucion?.value||'').trim();
-  const tipo = form.tipo?.value;
-  const fecha = form.fecha?.value;
-  const horas = Number(form.horas?.value);
-  const observaciones = (obsEl?.value||'').trim();
-
-  if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
-    showToast('Complete todos los campos obligatorios (*), incluido la verificación del colegiado.', 'error'); return;
-  }
-  if (!__COLEGIADO_VERIFIED) {
-    showToast('Debes verificar tu número de colegiado. Presiona "Verificar".', 'error');
-    try { colegiadoEl?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
-    return;
-  }
-  if (!/^\d+$/.test(colegiadoNumero)) {
-    showToast('El número de colegiado solo debe contener números.', 'error'); return;
-  }
-  if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
-  if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
-  if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
-  if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
-
-  if(!fileRef){
-    showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error');
-    markUploaderError(true);
-    try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
-    upZone?.focus?.();
-    return;
-  }
-  if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
-  const sizeMB = fileRef.size/1024/1024;
-  if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
-
-  const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
-  if(corrErr || !corrData){ showToast('No se pudo obtener correlativo: '+(corrErr?sbErrMsg(corrErr):''), 'error'); return; }
-  const correlativo = corrData;
-
-  const creditos = calcCreditos(horas);
-  const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
-
-  let archivo_url = null, archivo_mime = null;
-  {
-    const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-    const path = `${user.id}/${correlativo}-${safeName}`;
-    const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
-    if(upErr){ showToast('No se pudo subir el archivo: '+sbErrMsg(upErr),'error'); return; }
-    archivo_url = path; archivo_mime = fileRef.type;
-  }
-
-  const payload = {
-    usuario_id: user.id,
-    correlativo,
-    nombre, telefono, colegiado_numero: colegiadoNumero, colegiado_activo: colegiadoActivo,
-    actividad, institucion, tipo, fecha,
-    horas, creditos, observaciones,
-    archivo_url, archivo_mime,
-    hash
-  };
-
-  const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
-  if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
-
-  guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
-
-  await generarConstanciaPDF(inserted, fileRef).catch(()=> showToast('Error al generar PDF','error'));
-  showToast('Registro guardado y constancia generada.');
-
-  form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
-  try { precargarDesdeLocalStorage(user.id); } catch {}
-  // Re-apply cached verification so fieldsets stay enabled for next registration
-  try { restaurarVerificacionCacheada(); } catch {}
-  fileRef = null; markUploaderError(false);
-  await loadAndRender();
+  // Guard against double-submit
+  if(__SUBMITTING) return;
+  __SUBMITTING = true;
+  const originalBtnText = submitBtn?.innerHTML || '';
+  if(submitBtn){ submitBtn.disabled = true; submitBtn.innerHTML = '<span class="verifying-spinner"></span> Registrando…'; }
 
   try {
-    await actualizarConsolidadoEnStorage(user.id, __USER_ROWS_CACHE);
-  } catch (e) {
-    console.warn('No se pudo actualizar consolidado automáticamente:', e);
+    const sb = getSupabaseClient();
+    if(!sb){ showToast('Supabase no está disponible.', 'error'); return; }
+
+    const { data: s } = await sb.auth.getSession();
+    if(!s?.session){ showToast('Inicia sesión para registrar.', 'error'); return; }
+    const user = s.session.user;
+
+    const nombre = (document.getElementById('nombre')?.value||'').trim();
+    const telefono = (document.getElementById('telefono')?.value||'').trim();
+    const colegiadoNumero = (document.getElementById('colegiadoNumero')?.value||'').trim();
+    const colegiadoActivo = (document.getElementById('colegiadoActivo')?.value || '').trim();
+    const actividad = (document.getElementById('actividad')?.value||'').trim();
+    const institucion = (document.getElementById('institucion')?.value||'').trim();
+    const tipo = document.getElementById('tipo')?.value;
+    const fecha = document.getElementById('fecha')?.value;
+    const horas = Number(document.getElementById('horas')?.value);
+    const observaciones = (obsEl?.value||'').trim();
+
+    if(!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas){
+      showToast('Complete todos los campos obligatorios (*), incluido la verificación del colegiado.', 'error'); return;
+    }
+    if (!__COLEGIADO_VERIFIED) {
+      showToast('Debes verificar tu número de colegiado. Presiona "Verificar".', 'error');
+      try { colegiadoEl?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
+      return;
+    }
+    if (!/^\d+$/.test(colegiadoNumero)) {
+      showToast('El número de colegiado solo debe contener números.', 'error'); return;
+    }
+    if(!phoneValidGT(telefono)){ showToast('Teléfono inválido (+502 ########)', 'error'); return; }
+    if(!withinFiveYears(fecha)){ showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
+    if(!(horas>=0.5 && horas<=200)){ showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
+    if(observaciones.length>250){ showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
+
+    if(!fileRef){
+      showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error');
+      markUploaderError(true);
+      try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {}
+      upZone?.focus?.();
+      return;
+    }
+    if(!ALLOWED_MIME.includes(fileRef.type)){ showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
+    const sizeMB = fileRef.size/1024/1024;
+    if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
+
+    if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Obteniendo correlativo…';
+    const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
+    if(corrErr || !corrData){ showToast('No se pudo obtener correlativo: '+(corrErr?sbErrMsg(corrErr):''), 'error'); return; }
+    const correlativo = corrData;
+
+    const creditos = calcCreditos(horas);
+    const hash = hashSimple(`${correlativo}|${nombre}|${telefono}|${fecha}|${horas}|${creditos}`);
+
+    if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Subiendo comprobante…';
+    let archivo_url = null, archivo_mime = null;
+    {
+      const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+      const path = `${user.id}/${correlativo}-${safeName}`;
+      const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+      if(upErr){ showToast('No se pudo subir el archivo: '+sbErrMsg(upErr),'error'); return; }
+      archivo_url = path; archivo_mime = fileRef.type;
+    }
+
+    if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Guardando registro…';
+    const payload = {
+      usuario_id: user.id,
+      correlativo,
+      nombre, telefono, colegiado_numero: colegiadoNumero, colegiado_activo: colegiadoActivo,
+      actividad, institucion, tipo, fecha,
+      horas, creditos, observaciones,
+      archivo_url, archivo_mime,
+      hash
+    };
+
+    const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
+    if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
+
+    guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
+
+    // Generate PDF — non-blocking on mobile
+    if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Generando constancia…';
+    try {
+      await generarConstanciaPDF(inserted, fileRef);
+    } catch (pdfErr) {
+      console.error('Error generando PDF:', pdfErr);
+      showToast('Registro guardado, pero hubo un problema al generar la constancia. Puedes regenerarla desde el historial.', 'warn');
+    }
+
+    showToast('✅ Registro guardado y constancia generada.');
+
+    form.reset(); if(preview) preview.innerHTML=''; if(creditosEl) creditosEl.value='';
+    try { precargarDesdeLocalStorage(user.id); } catch {}
+    try { restaurarVerificacionCacheada(); } catch {}
+    fileRef = null; markUploaderError(false);
+    await loadAndRender();
+
+    try {
+      await actualizarConsolidadoEnStorage(user.id, __USER_ROWS_CACHE);
+    } catch (e) {
+      console.warn('No se pudo actualizar consolidado automáticamente:', e);
+    }
+
+  } catch (fatalErr) {
+    console.error('Error fatal en submit:', fatalErr);
+    showToast('Error inesperado: ' + (fatalErr?.message || 'Intenta de nuevo.'), 'error');
+  } finally {
+    __SUBMITTING = false;
+    if(submitBtn){ submitBtn.disabled = false; submitBtn.innerHTML = originalBtnText; }
   }
 });
 
@@ -1298,6 +1326,33 @@ async function downloadComprobante(path){
 /* =======================================================
    Helpers: obtener imagen del comprobante
 ======================================================= */
+function savePdfMobile(doc, filename) {
+  try {
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+    if (isMobile) {
+      const newTab = window.open(blobUrl, '_blank');
+      if (!newTab) {
+        const a = document.createElement('a');
+        a.href = blobUrl; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 2000);
+      } else {
+        setTimeout(()=> URL.revokeObjectURL(blobUrl), 60000);
+      }
+    } else {
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = filename;
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 2000);
+    }
+  } catch (e) {
+    console.warn('Blob save failed, fallback to doc.save:', e);
+    doc.save(filename);
+  }
+}
+
 function blobToDataURL(blob){
   return new Promise((resolve)=>{
     const fr = new FileReader();
@@ -1432,12 +1487,19 @@ async function generarConstanciaPDF(rec, localFileBlob){
   } catch (e) { console.warn('No se pudo insertar logo en PDF:', e); }
 
   try {
-    let evidDataUrl = null;
-    if (localFileBlob) {
-      evidDataUrl = await getPreviewDataUrlFromLocal(localFileBlob);
-    } else if (rec.archivo_url) {
-      evidDataUrl = await getPreviewDataUrlFromStorage(rec.archivo_url);
-    }
+    // Timeout evidence embedding at 8 seconds to prevent mobile hang
+    const evidPromise = (async ()=>{
+      let evidDataUrl = null;
+      if (localFileBlob) {
+        evidDataUrl = await getPreviewDataUrlFromLocal(localFileBlob);
+      } else if (rec.archivo_url) {
+        evidDataUrl = await getPreviewDataUrlFromStorage(rec.archivo_url);
+      }
+      return evidDataUrl;
+    })();
+
+    const timeoutPromise = new Promise(r => setTimeout(()=> r(null), 8000));
+    const evidDataUrl = await Promise.race([evidPromise, timeoutPromise]);
     if (evidDataUrl) {
       doc.addPage();
       doc.setFont('helvetica','bold'); doc.setFontSize(12);
@@ -1449,7 +1511,10 @@ async function generarConstanciaPDF(rec, localFileBlob){
       const topY = pad + 12;
 
       const tmpImg = new Image();
-      const loaded = new Promise(res => { tmpImg.onload = res; tmpImg.onerror = res; });
+      const loaded = new Promise(res => {
+        tmpImg.onload = res; tmpImg.onerror = res;
+        setTimeout(res, 5000); // Timeout for image load
+      });
       tmpImg.src = evidDataUrl; await loaded;
 
       const imgW = tmpImg.naturalWidth || 1000;
@@ -1475,7 +1540,7 @@ async function generarConstanciaPDF(rec, localFileBlob){
   doc.setFontSize(10); doc.setTextColor(120);
   if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
 
-  doc.save(`Constancia_${rec.correlativo}.pdf`);
+  savePdfMobile(doc, `Constancia_${rec.correlativo}.pdf`);
 }
 
 /* =======================================================
