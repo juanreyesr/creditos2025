@@ -1012,9 +1012,20 @@ form?.addEventListener('submit', async (e)=>{
     const sizeMB = fileRef.size/1024/1024;
     if(sizeMB>MAX_FILE_MB){ showToast('Archivo supera 10 MB.', 'error'); markUploaderError(true); return; }
 
-    console.log('[SUBMIT] 5. Obteniendo correlativo...');
+    console.log('[SUBMIT] 5. Refrescando token y obteniendo correlativo...');
     if(submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Obteniendo correlativo…';
-    const { data: corrData, error: corrErr } = await sb.rpc('next_correlativo');
+
+    // Ensure fresh token before any API call (mobile sessions can go stale)
+    try {
+      await Promise.race([
+        sb.auth.getSession(),
+        new Promise((_, r) => setTimeout(() => r('token refresh timeout'), 5000))
+      ]);
+    } catch (e) { console.warn('Token refresh skipped:', e); }
+
+    const rpcPromise = sb.rpc('next_correlativo');
+    const rpcTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout obteniendo correlativo. Revisa tu conexión.')), 12000));
+    const { data: corrData, error: corrErr } = await Promise.race([rpcPromise, rpcTimeout]);
     if(corrErr || !corrData){ showToast('No se pudo obtener correlativo: '+(corrErr?sbErrMsg(corrErr):''), 'error'); return; }
     const correlativo = corrData;
 
@@ -1027,7 +1038,9 @@ form?.addEventListener('submit', async (e)=>{
     {
       const safeName = fileRef.name.replace(/[^a-zA-Z0-9._-]/g,'_');
       const path = `${user.id}/${correlativo}-${safeName}`;
-      const { error: upErr } = await sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+      const uploadPromise = sb.storage.from('comprobantes').upload(path, fileRef, { contentType: fileRef.type, upsert:false });
+      const uploadTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout subiendo archivo. Intenta con un archivo más pequeño.')), 30000));
+      const { error: upErr } = await Promise.race([uploadPromise, uploadTimeout]);
       if(upErr){ showToast('No se pudo subir el archivo: '+sbErrMsg(upErr),'error'); return; }
       archivo_url = path; archivo_mime = fileRef.type;
     }
@@ -1044,7 +1057,9 @@ form?.addEventListener('submit', async (e)=>{
       hash
     };
 
-    const { data: inserted, error: insErr } = await sb.from('registros').insert(payload).select().single();
+    const insertPromise = sb.from('registros').insert(payload).select().single();
+    const insertTimeout = new Promise((_, r) => setTimeout(() => r(new Error('Timeout guardando registro. Revisa tu conexión.')), 15000));
+    const { data: inserted, error: insErr } = await Promise.race([insertPromise, insertTimeout]);
     if(insErr){ console.error(insErr); showToast('No se pudo guardar el registro: '+sbErrMsg(insErr),'error'); return; }
 
     console.log('[SUBMIT] 8. Registro guardado OK. Generando PDF...');
