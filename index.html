@@ -5,32 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
-
-  <!-- Evita que los modales aparezcan al inicio si el CSS no carga -->
   <style>.modal{display:none}</style>
-
-  <!-- Tu CSS -->
-  <link rel="stylesheet" href="./styles.css?v=3" />
+  <link rel="stylesheet" href="./styles.css?v=4" />
   <link rel="icon" href="data:,">
-
-  <!-- Librerías -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
-
-  <!-- PDF.js para rasterizar la primera página de PDFs adjuntos -->
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js" defer></script>
-
-  <!-- Credenciales Supabase -->
   <script>
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
-
-  <!-- App -->
-  <script src="./script.js?v=20" defer></script>
+  <script src="./script.js?v=21" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -40,11 +28,13 @@
       <img src="./assets/Logo-cpg.png" alt="Colegio de Psicólogos de Guatemala" class="logo-img" />
       <h1>Registro de Créditos Académicos</h1>
     </div>
-    <!-- Nav oculto hasta que acepten el modal de entrada -->
     <nav class="top-actions" id="mainNav" style="display:none">
-      <a class="btn nav-btn" href="https://youtu.be/zitwRCdNgQc" target="_blank" rel="noopener">
+      <button class="btn nav-btn" id="guiaBtn" type="button">
         <span class="nav-icon">📖</span> Guía de uso
-      </a>
+      </button>
+      <button class="btn nav-btn" id="reglamentoBtn" type="button">
+        <span class="nav-icon">📄</span> Reglamento CAEDUC
+      </button>
       <a class="btn nav-btn" href="./verificar.html">
         <span class="nav-icon">🔍</span> Verificar constancia
       </a>
@@ -57,7 +47,7 @@
 
   <main class="container">
 
-    <!-- Sección: requiere login (visible cuando no está autenticado) -->
+    <!-- Sección: requiere login -->
     <section class="card login-required-card" id="loginRequiredSection" style="display:none">
       <div class="login-required-content">
         <div class="login-required-icon">🔒</div>
@@ -73,13 +63,11 @@
       </div>
     </section>
 
-    <!-- Sección: formulario (visible solo cuando está autenticado) -->
+    <!-- Sección: formulario -->
     <section class="card" id="formSection" style="display:none" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
       <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
-
       <form id="registroForm" novalidate>
-        <!-- PASO 1: Verificación del colegiado -->
         <fieldset class="verification-fieldset" id="verificationFieldset">
           <legend>① Verificación de colegiado</legend>
           <label>Número de colegiado* (solo números)
@@ -88,82 +76,64 @@
               <button type="button" class="btn primary" id="verificarColegiadoBtn" style="white-space:nowrap;padding:10px 16px">Verificar</button>
             </div>
           </label>
-
-          <!-- Info del colegiado verificado -->
           <div id="colegiadoInfo" class="colegiado-info" style="display:none">
             <div id="colegiadoInfoContent"></div>
           </div>
         </fieldset>
 
-        <!-- PASO 2: Datos personales (se habilita tras verificación) -->
         <fieldset class="form-fieldset" id="datosPersonalesFieldset" disabled>
           <legend>② Datos personales</legend>
           <div class="grid">
             <label>Nombre completo*
               <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
             </label>
-
             <label>Celular (GT) *
               <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
             </label>
-
             <label>¿Colegiado activo?*
-              <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required
-                placeholder="Se llena automáticamente"
-                style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
+              <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required placeholder="Se llena automáticamente" style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
               <input type="hidden" id="colegiadoActivoHidden" name="colegiadoActivoValue" />
             </label>
           </div>
         </fieldset>
 
-        <!-- PASO 3: Datos de la actividad -->
         <fieldset class="form-fieldset" id="actividadFieldset" disabled>
           <legend>③ Datos de la actividad</legend>
-        <div class="grid">
-
-          <label>Nombre de la actividad*
-            <input type="text" name="actividad" id="actividad" required maxlength="140" />
-          </label>
-
-          <label>Institución / Organizador*
-            <input type="text" name="institucion" id="institucion" required maxlength="140" />
-          </label>
-
-          <label>Tipo de actividad*
-            <select name="tipo" id="tipo" required>
-              <option value="">— Seleccione —</option>
-              <option>Teórica</option>
-              <option>Práctica</option>
-              <option>Voluntariado profesional</option>
-            </select>
-          </label>
-
-          <label>Fecha de la actividad*
-            <input type="date" name="fecha" id="fecha" required />
-          </label>
-
-          <label>Horas registradas* (admite decimales)
-            <input type="number" step="0.5" min="0.5" max="600" name="horas" id="horas" required />
-          </label>
-
-          <label>Créditos calculados
-            <input type="text" id="creditos" readonly />
-          </label>
-        </div>
+          <div class="grid">
+            <label>Nombre de la actividad*
+              <input type="text" name="actividad" id="actividad" required maxlength="140" />
+            </label>
+            <label>Institución / Organizador*
+              <input type="text" name="institucion" id="institucion" required maxlength="140" />
+            </label>
+            <label>Tipo de actividad*
+              <select name="tipo" id="tipo" required>
+                <option value="">— Seleccione —</option>
+                <option>Teórica</option>
+                <option>Práctica</option>
+                <option>Voluntariado profesional</option>
+              </select>
+            </label>
+            <label>Fecha de la actividad*
+              <input type="date" name="fecha" id="fecha" required />
+            </label>
+            <label>Horas registradas* (admite decimales)
+              <input type="number" step="0.5" min="0.5" max="600" name="horas" id="horas" required />
+            </label>
+            <label>Créditos calculados
+              <input type="text" id="creditos" readonly />
+            </label>
+          </div>
         </fieldset>
 
         <label>Observaciones (máx. 250 caracteres)
           <textarea id="observaciones" maxlength="250" rows="3" placeholder="Opcional"></textarea>
         </label>
 
-        <!-- CARGA DE ARCHIVOS (OBLIGATORIA) -->
         <div class="uploader" id="uploader" tabindex="0" aria-label="Zona de carga de comprobante (obligatorio)" aria-required="true">
           <input type="file" id="archivo" accept="application/pdf,image/png,image/jpg,image/jpeg" hidden />
           <div class="uploader-inner">
-            <p>
-              <strong>Arrastre y suelte</strong> su comprobante <strong>(obligatorio)</strong> — formatos: PDF, JPG, PNG, JPEG —
-              o <button type="button" class="linklike" id="browseBtn">examinar</button>
-            </p>
+            <p><strong>Arrastre y suelte</strong> su comprobante <strong>(obligatorio)</strong> — formatos: PDF, JPG, PNG, JPEG — o <button type="button" class="linklike" id="browseBtn">examinar</button></p>
             <p class="hint">Tamaño máximo: 10 MB</p>
             <div id="preview" class="preview" aria-live="polite"></div>
           </div>
@@ -176,7 +146,7 @@
       </form>
     </section>
 
-    <!-- Sección: historial (visible solo cuando está autenticado) -->
+    <!-- Sección: historial -->
     <section class="card" id="histSection" style="display:none" aria-labelledby="histTitle">
       <h2 id="histTitle">Mis registros (sesión actual)</h2>
       <div class="actions" style="align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
@@ -193,106 +163,80 @@
         <table id="tablaRegistros" class="table">
           <thead>
             <tr>
-              <th>Correlativo</th>
-              <th>Fecha</th>
-              <th>Actividad</th>
-              <th>Horas</th>
-              <th>Créditos</th>
-              <th>Acciones</th>
+              <th>Correlativo</th><th>Fecha</th><th>Actividad</th><th>Horas</th><th>Créditos</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
     </section>
-  </main>
 
-  <!-- MODAL ADMIN -->
-  <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
-    <div class="modal-content" role="document">
-      <header class="modal-header">
-        <h3 id="adminTitle">Panel de Administrador</h3>
-        <button class="iconbtn" id="closeAdmin" type="button">✕</button>
-      </header>
+    <!-- ============================================================
+         SECCIÓN ADMIN (sub-menú completo, no modal)
+    ============================================================ -->
+    <section id="adminSection" style="display:none" class="admin-full-section">
 
-      <!-- Login administrador local por PIN -->
-      <div id="adminAuth">
-        <p>Ingrese contraseña de administrador (PIN local):</p>
-        <input type="password" id="adminPass" placeholder="•••••" />
-        <div class="actions">
-          <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+      <!-- Cabecera admin -->
+      <div class="admin-section-topbar">
+        <button class="btn nav-btn" id="backToMainBtn" type="button">
+          <span class="nav-icon">←</span> Volver al inicio
+        </button>
+        <div class="admin-section-title">
+          <span class="nav-icon">🛡️</span>
+          <h2>Panel de Administración</h2>
+          <span class="admin-mode-badge" id="adminModeBadge">Admin local</span>
         </div>
+        <div style="width:140px"></div><!-- spacer -->
+      </div>
 
-        <hr />
+      <!-- Tabs de navegación -->
+      <nav class="admin-tabs" id="adminTabs">
+        <button class="admin-tab-btn active" data-tab="registros" type="button">📋 Registros</button>
+        <button class="admin-tab-btn" data-tab="usuarios" type="button">👥 Usuarios</button>
+        <button class="admin-tab-btn" data-tab="configuracion" type="button">⚙️ Configuración</button>
+      </nav>
 
-        <!-- Superadmin por correo/clave -->
-        <h4>Entrar como superadmin</h4>
-        <p class="muted">Necesita un usuario con validación de super administrador registrado en CAEDUC</p>
-        <label>Correo
-          <input type="email" id="superEmail" placeholder="correo@dominio.com" />
-        </label>
-        <label>Contraseña
-          <input type="password" id="superPass" placeholder="********" />
-        </label>
-        <div class="actions">
-          <button class="btn" id="superLogin" type="button">Entrar como superadmin</button>
-          <span class="muted" id="adminState">—</span>
+      <!-- ── TAB: REGISTROS ── -->
+      <div class="admin-tab-panel" id="adminTab-registros">
+        <div class="card">
+          <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+            <input type="text" id="adminSearch" placeholder="Buscar correlativo (CPG-AAAAmm-####)" style="flex:1;min-width:240px" />
+            <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
+            <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
+            <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
+              <input type="checkbox" id="showDeleted" />
+              <span>Mostrar eliminados</span>
+            </label>
+            <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
+            <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
+            <span class="muted" id="exportStatus">—</span>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="adminTable">
+              <thead>
+                <tr>
+                  <th>Correlativo</th><th>Nombre</th><th>Teléfono</th><th>Colegiado</th>
+                  <th>Activo</th><th>Actividad</th><th>Institución</th><th>Tipo</th>
+                  <th>Fecha</th><th>Horas</th><th>Créditos</th><th>Archivo</th>
+                  <th>Hash</th><th>Estado</th><th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="muted" id="diagBox" style="margin-top:8px">—</p>
         </div>
       </div>
 
-      <!-- Cuerpo admin -->
-      <div id="adminBody" hidden>
-        <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-          <strong id="adminModeBadge">Modo: Admin local</strong>
-          <input type="text" id="adminSearch" placeholder="Buscar correlativo (CPG-AAAAmm-####)" style="flex:1;min-width:240px" />
-          <button class="btn" id="adminSearchBtn" type="button">Buscar</button>
-          <button class="btn" id="adminClearSearch" type="button">Limpiar</button>
-
-          <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
-            <input type="checkbox" id="showDeleted" />
-            <span>Mostrar eliminados</span>
-          </label>
-
-          <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
-          <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
-          <span class="muted" id="exportStatus">—</span>
-        </div>
-
-        <div class="table-wrap">
-          <table class="table" id="adminTable">
-            <thead>
-              <tr>
-                <th>Correlativo</th>
-                <th>Nombre</th>
-                <th>Teléfono</th>
-                <th>Colegiado</th>
-                <th>Activo</th>
-                <th>Actividad</th>
-                <th>Institución</th>
-                <th>Tipo</th>
-                <th>Fecha</th>
-                <th>Horas</th>
-                <th>Créditos</th>
-                <th>Archivo</th>
-                <th>Hash</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-
-        <!-- Gestión de usuarios (solo superadmin) -->
-        <div id="userAdminPanel" class="card" style="margin-top:14px" hidden>
+      <!-- ── TAB: USUARIOS ── -->
+      <div class="admin-tab-panel" id="adminTab-usuarios" style="display:none">
+        <div class="card" id="userAdminPanel">
           <h4 style="margin:0 0 10px">Activar cuentas de usuarios</h4>
-          <p class="muted" style="margin:0 0 10px">
-            Si un usuario no recibió su correo de verificación, puedes verificar su estado o activar su cuenta directamente.
-          </p>
+          <p class="muted" style="margin:0 0 10px">Si un usuario no recibió su correo de verificación, puedes verificar su estado o activar su cuenta directamente.</p>
           <label>Correo del usuario
             <input type="email" id="userAdminEmail" placeholder="usuario@dominio.com" />
           </label>
-          <div class="actions" style="gap:8px; flex-wrap:wrap">
+          <div class="actions" style="gap:8px;flex-wrap:wrap">
             <button class="btn" id="userCheckBtn" type="button">Verificar estado</button>
             <button class="btn warn" id="userActivateBtn" type="button">Activar cuenta sin correo</button>
             <span class="muted" id="userAdminState">—</span>
@@ -301,25 +245,98 @@
           <hr style="border-color:var(--border);margin:18px 0" />
 
           <h4 style="margin:0 0 10px">Gestión de superadministradores</h4>
-          <p class="muted" style="margin:0 0 10px">
-            Asigna o quita permisos de superadmin a otros usuarios registrados.
-          </p>
+          <p class="muted" style="margin:0 0 10px">Asigna o quita permisos de superadmin a otros usuarios registrados.</p>
           <label>Correo del usuario
             <input type="email" id="adminRoleEmail" placeholder="usuario@dominio.com" />
           </label>
-          <div class="actions" style="gap:8px; flex-wrap:wrap">
+          <div class="actions" style="gap:8px;flex-wrap:wrap">
             <button class="btn primary" id="makeAdminBtn" type="button">Asignar superadmin</button>
             <button class="btn warn" id="removeAdminBtn" type="button">Quitar superadmin</button>
             <span class="muted" id="adminRoleState">—</span>
           </div>
         </div>
+      </div>
 
-        <p class="muted" id="diagBox">—</p>
+      <!-- ── TAB: CONFIGURACIÓN ── -->
+      <div class="admin-tab-panel" id="adminTab-configuracion" style="display:none">
+
+        <!-- Video Guía -->
+        <div class="card" style="margin-bottom:16px">
+          <h3 style="margin:0 0 6px">📹 Video guía de uso</h3>
+          <p class="muted" style="margin:0 0 14px">URL del video que se muestra al presionar "Guía de uso". Compatible con YouTube (youtu.be o youtube.com).</p>
+          <label>URL del video
+            <input type="url" id="cfgVideoUrl" placeholder="https://youtu.be/xxxxx" />
+          </label>
+          <div class="actions" style="margin-top:10px;gap:8px">
+            <button class="btn primary" id="cfgSaveVideoBtn" type="button">Guardar URL</button>
+            <button class="btn" id="cfgPreviewVideoBtn" type="button">Vista previa</button>
+            <span class="muted" id="cfgVideoState">—</span>
+          </div>
+        </div>
+
+        <!-- Reglamento PDF -->
+        <div class="card">
+          <h3 style="margin:0 0 6px">📄 Reglamento CAEDUC (PDF)</h3>
+          <p class="muted" style="margin:0 0 14px">Documento que se descarga al presionar "Reglamento CAEDUC" en la barra superior. Formato PDF, máx. 20 MB.</p>
+
+          <div id="cfgReglamentoActual" class="colegiado-info" style="margin-bottom:12px">
+            <span class="muted">Cargando estado del documento…</span>
+          </div>
+
+          <label>Cargar nuevo PDF
+            <input type="file" id="cfgReglamentoFile" accept="application/pdf" />
+          </label>
+          <div class="actions" style="margin-top:10px;gap:8px">
+            <button class="btn primary" id="cfgUploadReglamentoBtn" type="button">Subir y reemplazar</button>
+            <span class="muted" id="cfgReglamentoState">—</span>
+          </div>
+          <p class="muted" style="margin-top:8px;font-size:13px">⚠️ Al subir un nuevo archivo se reemplaza el anterior automáticamente.</p>
+        </div>
+
+      </div><!-- /tab configuracion -->
+
+    </section><!-- /adminSection -->
+
+  </main>
+
+  <!-- ============================================================
+       MODAL: AUTH ADMIN (solo credenciales)
+  ============================================================ -->
+  <div class="modal" id="adminModal" aria-hidden="true" role="dialog" aria-labelledby="adminTitle">
+    <div class="modal-content modal-admin-auth-content" role="document">
+      <header class="modal-header">
+        <h3 id="adminTitle">Acceder al Panel</h3>
+        <button class="iconbtn" id="closeAdmin" type="button">✕</button>
+      </header>
+      <div style="padding:16px 20px">
+        <!-- Login admin local por PIN -->
+        <div id="adminAuth">
+          <p>Ingrese contraseña de administrador (PIN local):</p>
+          <input type="password" id="adminPass" placeholder="•••••" />
+          <div class="actions">
+            <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
+          </div>
+
+          <hr style="border-color:var(--border);margin:18px 0"/>
+
+          <h4 style="margin:0 0 8px">Entrar como superadmin</h4>
+          <p class="muted" style="margin:0 0 10px">Necesita un usuario con validación de superadministrador registrado en CAEDUC</p>
+          <label>Correo
+            <input type="email" id="superEmail" placeholder="correo@dominio.com" />
+          </label>
+          <label style="margin-top:8px">Contraseña
+            <input type="password" id="superPass" placeholder="********" />
+          </label>
+          <div class="actions" style="margin-top:10px;gap:8px">
+            <button class="btn" id="superLogin" type="button">Entrar como superadmin</button>
+            <span class="muted" id="adminState">—</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- MODAL DE AUTENTICACIÓN -->
+  <!-- MODAL DE AUTENTICACIÓN (usuarios) -->
   <div class="modal" id="authModal" aria-hidden="true" role="dialog">
     <div class="modal-content modal-auth-content" role="document">
       <header class="modal-header">
@@ -343,7 +360,7 @@
     </div>
   </div>
 
-  <!-- MODAL DE ENTRADA (obligatorio cada vez) -->
+  <!-- MODAL DE ENTRADA (obligatorio cada visita) -->
   <div class="modal" id="entryModal" aria-hidden="true" role="dialog">
     <div class="modal-content modal-entry-content" role="document">
       <div class="entry-modal-body">
@@ -352,14 +369,27 @@
         </div>
         <h2 class="entry-title">Bienvenido al Registro de Créditos Académicos</h2>
         <p class="entry-subtitle">Colegio de Psicólogos de Guatemala</p>
-
         <div class="entry-info">
           <p><strong>Para registrar constancias o gestionar las que ya tienes</strong>, debes crear una cuenta o iniciar sesión con tu usuario existente.</p>
           <p>Al continuar, aceptas que tus datos se almacenarán para generar correlativos y emitir constancias conforme al Art. 16 (1 crédito = 16 horas).</p>
           <p class="entry-ethics">De acuerdo con el principio 3.1.1 del código de ética: Los psicólogos representan digna y adecuadamente su profesión. Evidencian una conducta honesta, proba, no participan en actividades ilícitas, engaño, fraude o tergiversación de información, discurso y/o hechos.</p>
         </div>
-
         <button class="btn primary large-btn entry-accept-btn" id="entryAccept" type="button">Acepto y continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: VIDEO GUÍA -->
+  <div class="modal" id="videoModal" aria-hidden="true" role="dialog" aria-labelledby="videoModalTitle">
+    <div class="modal-content modal-video-content" role="document">
+      <header class="modal-header">
+        <h3 id="videoModalTitle">📖 Guía de uso</h3>
+        <button class="iconbtn" id="closeVideoModal" type="button">✕</button>
+      </header>
+      <div class="video-modal-body">
+        <div class="video-wrapper">
+          <iframe id="videoIframe" src="" frameborder="0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" title="Guía de uso"></iframe>
+        </div>
       </div>
     </div>
   </div>
@@ -368,7 +398,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <footer class="foot">
-    <small>© 2025 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
+    <small>© 2025 - 2026 — Colegio de Psicólogos de Guatemala, junta directiva 2025 - 2027 con aval de CAEDUC.</small>
   </footer>
 </body>
 </html>
