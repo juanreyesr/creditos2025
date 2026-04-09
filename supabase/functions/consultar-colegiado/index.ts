@@ -6,17 +6,53 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const CPG_PAGE  = "https://www.colegiodepsicologos.org.gt/consulta-saldos/";
-const CPG_AJAX  = "https://www.colegiodepsicologos.org.gt/wp-admin/admin-ajax.php";
+const CPG_PAGE = "https://www.colegiodepsicologos.org.gt/consulta-saldos/";
+const CPG_AJAX = "https://www.colegiodepsicologos.org.gt/wp-admin/admin-ajax.php";
 
-// Extraer texto entre dos cadenas
-function between(html: string, before: string, after: string): string {
-  const start = html.indexOf(before);
-  if (start === -1) return "";
-  const from = start + before.length;
-  const end = html.indexOf(after, from);
-  if (end === -1) return "";
-  return html.slice(from, end).replace(/&nbsp;/g, "").trim();
+// Intenta extraer el nonce con múltiples patrones
+function extractNonce(html: string): string {
+  const patterns = [
+    /"nonce"\s*:\s*"([a-z0-9]+)"/i,
+    /"security"\s*:\s*"([a-z0-9]+)"/i,
+    /'nonce'\s*:\s*'([a-z0-9]+)'/i,
+    /'security'\s*:\s*'([a-z0-9]+)'/i,
+    /nonce['":\s]+([a-f0-9]{10})/i,
+    /security['":\s]+([a-f0-9]{10})/i,
+    /ajax_nonce['":\s]+([a-z0-9]+)/i,
+    /(?:nonce|security).{0,30}?([a-f0-9]{10})/i,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m?.[1]) return m[1];
+  }
+  return "";
+}
+
+// Limpia texto HTML
+const clean = (s: string) =>
+  s.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+
+function parseHtml(html: string) {
+  const nombre =
+    html.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i)?.[1]?.let?.(clean) ??
+    clean(html.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? "");
+
+  const estatus =
+    html.match(/<b>\s*(ACTIVO|INACTIVO|SUSPENDIDO|MOROSO)\s*<\/b>/i)?.[1]?.trim() ?? "";
+
+  const field = (label: string) => {
+    const re = new RegExp(label + "[^<]*<\\/b>(?:&nbsp;|\\s)*([^<]+)", "i");
+    return clean(html.match(re)?.[1] ?? "");
+  };
+
+  return {
+    nombre:              clean(html.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i)?.[1] ?? ""),
+    estatus,
+    fecha_colegiacion:   field("Fecha de colegiaci"),
+    ultimo_pago:         field("ltimo pago"),       // cubre Último y Ultimo
+    cuota_congreso:      field("Cuota congreso"),
+    creditos_academicos: field("ditos acad"),        // cubre Créditos académicos
+  };
 }
 
 serve(async (req: Request) => {
@@ -25,7 +61,8 @@ serve(async (req: Request) => {
   }
 
   try {
-    const { id } = await req.json();
+    const body = await req.json();
+    const { id, debug = false } = body;
 
     if (!id || !/^\d+$/.test(String(id))) {
       return new Response(
@@ -34,103 +71,95 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── Paso 1: obtener el nonce desde la página ──────────────────────────
+    // ── Paso 1: cargar página para obtener nonce y cookies ────────────────
     const pageRes = await fetch(CPG_PAGE, {
-      headers: { "User-Agent": "Mozilla/5.0" },
+      headers: {
+        "User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-GT,es;q=0.9,en;q=0.8",
+      },
     });
 
-    if (!pageRes.ok) {
+    const rawCookies = pageRes.headers.get("set-cookie") ?? "";
+    // Extraer solo nombre=valor de cada cookie (sin flags)
+    const cookieHeader = rawCookies
+      .split(",")
+      .map(c => c.split(";")[0].trim())
+      .filter(Boolean)
+      .join("; ");
+
+    const pageHtml = await pageRes.text();
+    const nonce    = extractNonce(pageHtml);
+
+    // ── Modo DEBUG: devuelve info intermedia sin llegar al AJAX ───────────
+    if (debug) {
+      const contexts = (pageHtml.match(/.{0,60}(?:nonce|security).{0,60}/gi) ?? []).slice(0, 8);
       return new Response(
-        JSON.stringify({ error: "No se pudo cargar la página de consulta" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          page_status:    pageRes.status,
+          nonce_found:    nonce || null,
+          nonce_contexts: contexts,
+          cookies:        cookieHeader || null,
+          page_length:    pageHtml.length,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const pageHtml = await pageRes.text();
-
-    // El nonce está en un wp_localize_script, buscar patrón "nonce":"VALOR"
-    const nonceMatch = pageHtml.match(/"nonce"\s*:\s*"([a-f0-9]+)"/);
-    const nonce = nonceMatch?.[1] ?? "";
-
     if (!nonce) {
       return new Response(
-        JSON.stringify({ error: "No se pudo obtener el token de seguridad" }),
+        JSON.stringify({ error: "No se pudo obtener el token de seguridad. Llama con debug:true para diagnosticar." }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // ── Paso 2: llamar a admin-ajax.php ───────────────────────────────────
-    const body = new URLSearchParams({
+    const formBody = new URLSearchParams({
       action:   "consultar_saldo",
       security: nonce,
       id:       String(id),
     });
 
     const ajaxRes = await fetch(CPG_AJAX, {
-      method:  "POST",
+      method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent":   "Mozilla/5.0",
+        "User-Agent":   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Referer":      CPG_PAGE,
+        "Origin":       "https://www.colegiodepsicologos.org.gt",
+        ...(cookieHeader ? { "Cookie": cookieHeader } : {}),
       },
-      body: body.toString(),
+      body: formBody.toString(),
     });
 
-    if (!ajaxRes.ok) {
+    const responseText = (await ajaxRes.text()).trim();
+
+    // WordPress AJAX falla con "0" o "-1"
+    if (!responseText || responseText === "0" || responseText === "-1") {
       return new Response(
         JSON.stringify({ error: "Colegiado no encontrado" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const html = await ajaxRes.text();
+    // ── Paso 3: parsear HTML y devolver JSON ──────────────────────────────
+    const parsed = parseHtml(responseText);
 
-    // Si la respuesta está vacía o es "0" (WordPress AJAX failure)
-    if (!html || html.trim() === "0" || html.trim() === "") {
+    if (!parsed.nombre && !parsed.estatus) {
       return new Response(
-        JSON.stringify({ error: "Colegiado no encontrado" }),
+        JSON.stringify({ error: "Colegiado no encontrado", raw: responseText.slice(0, 200) }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // ── Paso 3: parsear el HTML de respuesta ──────────────────────────────
-    // Nombre: <h3 style="...">Juan José Reyes Rodríguez</h3>
-    const nombreMatch = html.match(/<h3[^>]*>\s*([\s\S]*?)\s*<\/h3>/);
-    const nombre = nombreMatch?.[1]?.trim() ?? "";
-
-    // Estatus: <b> ACTIVO </b>  (segunda <b> dentro del <h4> de estatus)
-    const estatusMatch = html.match(/<h4[^>]*color:\s*#29295F[^>]*>\s*<b>\s*(.*?)\s*<\/b>/);
-    const estatus = estatusMatch?.[1]?.trim() ?? "";
-
-    const fecha_colegiacion = between(html, "Fecha de colegiación:</b>", "</span>")
-      .replace(/<[^>]+>/g, "").trim();
-
-    const ultimo_pago = between(html, "Último pago:</b>", "</span>")
-      .replace(/<[^>]+>/g, "").trim();
-
-    const cuota_congreso = between(html, "Cuota congreso anual:</b>", "</span>")
-      .replace(/<[^>]+>/g, "").replace(/<br>/g, "").trim();
-
-    const creditos_academicos = between(html, "Créditos académicos:</b>", "</span>")
-      .replace(/<[^>]+>/g, "").replace(/<br>/g, "").trim();
-
-    // ── Paso 4: devolver JSON estructurado ────────────────────────────────
     return new Response(
-      JSON.stringify({
-        numero:              id,
-        nombre,
-        estatus,
-        fecha_colegiacion,
-        ultimo_pago,
-        cuota_congreso,
-        creditos_academicos,
-      }),
+      JSON.stringify({ numero: id, ...parsed }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
 
   } catch (err) {
     return new Response(
-      JSON.stringify({ error: err.message || "Error interno" }),
+      JSON.stringify({ error: err.message ?? "Error interno" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
