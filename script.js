@@ -344,6 +344,8 @@ function hideAllContent() {
   if (adminSection) adminSection.style.display = 'none';
 }
 
+const aulaVirtualNavBtn = document.getElementById('aulaVirtualNavBtn');
+
 function updateAuthButton(isLoggedIn) {
   if (!authBtn) return;
   if (isLoggedIn) {
@@ -355,7 +357,21 @@ function updateAuthButton(isLoggedIn) {
     authBtn.classList.remove('session-active-btn');
     authBtn.classList.add('primary-nav');
   }
+  if (aulaVirtualNavBtn) aulaVirtualNavBtn.style.display = isLoggedIn ? '' : 'none';
 }
+
+aulaVirtualNavBtn?.addEventListener('click', async () => {
+  const sb = getSupabaseClient(); if (!sb) return;
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) { showToast('Inicia sesión primero.', 'warn'); return; }
+  // Obtener número de colegiado y nombre del usuario desde sus registros
+  const { data: rows } = await sb.from('registros').select('colegiado_numero, nombre').eq('usuario_id', session.user.id).not('colegiado_numero', 'is', null).limit(1);
+  const colegiado = rows?.[0]?.colegiado_numero || '';
+  const nombre = rows?.[0]?.nombre || '';
+  const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
+  const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
+  window.open(`https://aulavirtualcpg.org/${query}#${hash}`, '_blank');
+});
 
 async function applyUIState() {
   if (!__ENTRY_ACCEPTED) { hideNav(); hideAllContent(); return; }
