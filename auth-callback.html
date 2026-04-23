@@ -30,13 +30,22 @@
   <script>
     (async ()=>{
       const sb = window.supabase.createClient(window.SB_URL, window.SB_KEY);
-      // Supabase añade en el hash parámetros que indican el tipo de acción
+
+      // OAuth PKCE: code viene como query param ?code=...
+      const queryParams = new URLSearchParams(location.search);
+      const code = queryParams.get('code');
+      if (code) {
+        try { await sb.auth.exchangeCodeForSession(code); } catch (e) { console.error('OAuth exchange error:', e); }
+        location.href = './index.html';
+        return;
+      }
+
+      // Email links: Supabase usa hash params (#type=recovery | signup)
       const hash = location.hash || '';
       const params = new URLSearchParams(hash.replace(/^#/, ''));
-      const type = params.get('type'); // 'recovery' (reset) o 'signup' (verify)
+      const type = params.get('type');
 
       if (type === 'recovery') {
-        // Mostrar UI para cambiar contraseña
         document.getElementById('view-verify').style.display='none';
         document.getElementById('view-reset').style.display='block';
 
@@ -49,8 +58,6 @@
           setTimeout(()=> location.href = './index.html', 1200);
         };
       } else {
-        // Verificación de email
-        // Con solo abrir el enlace, Supabase valida la sesión; redirigimos al inicio
         setTimeout(()=> location.href = './index.html', 1000);
       }
     })();

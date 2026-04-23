@@ -311,6 +311,7 @@ const loginRequiredSection = document.getElementById('loginRequiredSection');
 const loginRequiredBtn = document.getElementById('loginRequiredBtn');
 const signupRequiredBtn = document.getElementById('signupRequiredBtn');
 const adminSection = document.getElementById('adminSection');
+const aulavirtualSection = document.getElementById('aulavirtualSection');
 
 /* =======================================================
    UI State Management
@@ -321,6 +322,7 @@ function hideNav() { if (mainNav) mainNav.style.display = 'none'; }
 function showAuthenticatedUI() {
   if (formSection) formSection.style.display = '';
   if (histSection) histSection.style.display = '';
+  if (aulavirtualSection) aulavirtualSection.style.display = '';
   if (loginRequiredSection) loginRequiredSection.style.display = 'none';
   if (adminSection) adminSection.style.display = 'none';
   setTimeout(() => { try { restaurarVerificacionCacheada(); } catch {} }, 100);
@@ -329,6 +331,7 @@ function showAuthenticatedUI() {
 function showUnauthenticatedUI() {
   if (formSection) formSection.style.display = 'none';
   if (histSection) histSection.style.display = 'none';
+  if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = '';
   if (adminSection) adminSection.style.display = 'none';
 }
@@ -336,6 +339,7 @@ function showUnauthenticatedUI() {
 function hideAllContent() {
   if (formSection) formSection.style.display = 'none';
   if (histSection) histSection.style.display = 'none';
+  if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = 'none';
   if (adminSection) adminSection.style.display = 'none';
 }
@@ -374,6 +378,7 @@ function openAdminSection() {
   // Hide main content, show admin section
   if (formSection) formSection.style.display = 'none';
   if (histSection) histSection.style.display = 'none';
+  if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = 'none';
   if (adminSection) adminSection.style.display = '';
   // Load config fields
@@ -824,6 +829,15 @@ authBtn?.addEventListener('click', async () => {
 
 closeAuth?.addEventListener('click', () => closeModal(authModal));
 authPass2?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin?.click(); });
+
+document.getElementById('doGoogleLogin')?.addEventListener('click', async () => {
+  const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: `${location.origin}/auth-callback.html` },
+  });
+  if (error) showToast('Error al iniciar con Google: ' + sbErrMsg(error), 'error');
+});
 
 doSignup?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
@@ -1602,3 +1616,143 @@ async function getQrDataUrl(text, size = 96) {
   // Cargar config en segundo plano (sin bloquear)
   loadConfig().catch(e => console.warn('Config load error:', e));
 })();
+
+/* =======================================================
+   Aula Virtual CPG — importar certificados
+======================================================= */
+function getAulaVirtualClient() {
+  if (!getAulaVirtualClient._client) {
+    const sdk = window.supabase;
+    if (!sdk?.createClient || !window.SB_URL || !window.SB_KEY) return null;
+    getAulaVirtualClient._client = sdk.createClient(window.SB_URL, window.SB_KEY, {
+      db: { schema: 'aulacaeduc' },
+    });
+  }
+  return getAulaVirtualClient._client;
+}
+
+let __AV_CERTS = [];
+let __AV_IMPORTED_HASHES = new Set();
+
+// Collapsible toggle
+(function setupAvToggle() {
+  const header = document.querySelector('#aulavirtualSection h2');
+  const body = document.getElementById('avBody');
+  const chevron = document.getElementById('avChevron');
+  if (!header || !body) return;
+  header.addEventListener('click', () => {
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : '';
+    if (chevron) chevron.style.transform = open ? '' : 'rotate(90deg)';
+    if (!open) tryPrefillAvColegiado();
+  });
+})();
+
+async function tryPrefillAvColegiado() {
+  const input = document.getElementById('avColegiadoNum');
+  if (!input || input.value.trim()) return;
+  const sb = getSupabaseClient(); if (!sb) return;
+  const user = __CACHED_SESSION?.user; if (!user) return;
+  const { data } = await sb.from('registros').select('colegiado_numero').eq('usuario_id', user.id).not('colegiado_numero', 'is', null).limit(1);
+  if (data?.[0]?.colegiado_numero) input.value = data[0].colegiado_numero;
+}
+
+document.getElementById('avBuscarBtn')?.addEventListener('click', loadAulaVirtualCerts);
+
+async function loadAulaVirtualCerts() {
+  const sb = getSupabaseClient(); if (!sb) return;
+  const user = __CACHED_SESSION?.user; if (!user) { showToast('Inicia sesión primero.', 'warn'); return; }
+  const avStatus = document.getElementById('avStatus');
+  const avResults = document.getElementById('avResults');
+  let colegiadoNum = (document.getElementById('avColegiadoNum')?.value || '').trim();
+  if (!colegiadoNum) {
+    const { data } = await sb.from('registros').select('colegiado_numero').eq('usuario_id', user.id).not('colegiado_numero', 'is', null).limit(1);
+    colegiadoNum = data?.[0]?.colegiado_numero || '';
+    if (document.getElementById('avColegiadoNum') && colegiadoNum) document.getElementById('avColegiadoNum').value = colegiadoNum;
+  }
+  if (!colegiadoNum) { if (avStatus) avStatus.textContent = 'Ingresa tu número de colegiado.'; return; }
+  if (avStatus) avStatus.textContent = 'Buscando…';
+  const avSb = getAulaVirtualClient(); if (!avSb) { if (avStatus) avStatus.textContent = 'Error de conexión.'; return; }
+  const { data: certs, error } = await avSb
+    .from('cpg_certificates')
+    .select('certificate_code, video_title, video_duration, issued_at, recipient_name, verify_url')
+    .eq('collegiate_number', colegiadoNum)
+    .order('issued_at', { ascending: false });
+  if (error) { if (avStatus) avStatus.textContent = 'Error: ' + error.message; return; }
+  const codes = (certs || []).map(c => c.certificate_code).filter(Boolean);
+  let importedHashes = new Set();
+  if (codes.length) {
+    const { data: imp } = await sb.from('registros').select('hash').eq('usuario_id', user.id).in('hash', codes);
+    (imp || []).forEach(r => { if (r.hash) importedHashes.add(r.hash); });
+  }
+  __AV_CERTS = certs || [];
+  __AV_IMPORTED_HASHES = importedHashes;
+  renderAvCerts();
+  if (avResults) avResults.style.display = __AV_CERTS.length ? '' : 'none';
+  if (avStatus) avStatus.textContent = __AV_CERTS.length ? `${__AV_CERTS.length} certificado(s) encontrado(s)` : 'Sin certificados en el Aula Virtual para este número.';
+}
+
+function renderAvCerts() {
+  const tbody = document.getElementById('avCertsBody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  __AV_CERTS.forEach(cert => {
+    const imported = __AV_IMPORTED_HASHES.has(cert.certificate_code);
+    const horas = Number(cert.video_duration) || '—';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td title="${sanitize(cert.video_title)}">${sanitize(cert.video_title.slice(0, 40))}${cert.video_title.length > 40 ? '…' : ''}</td>
+      <td>${cert.issued_at ? cert.issued_at.slice(0, 10) : '—'}</td>
+      <td>${horas !== '—' ? horas + ' h' : '—'}</td>
+      <td>${imported
+        ? '<span class="muted" style="font-size:13px">✓ Ya importado</span>'
+        : `<button class="btn" data-cert="${sanitize(cert.certificate_code)}" data-av-import type="button" style="padding:4px 10px;font-size:13px">Importar</button>`
+      }</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById('avCertsBody')?.addEventListener('click', async e => {
+  const btn = e.target.closest('[data-av-import]');
+  if (!btn) return;
+  const certCode = btn.dataset.cert;
+  btn.disabled = true; btn.textContent = 'Importando…';
+  await importAvCert(certCode);
+});
+
+async function importAvCert(certCode) {
+  const cert = __AV_CERTS.find(c => c.certificate_code === certCode);
+  if (!cert) return;
+  const sb = getSupabaseClient(); if (!sb) return;
+  const user = __CACHED_SESSION?.user; if (!user) return;
+  // Get user's existing datos personales
+  const { data: existing } = await sb.from('registros').select('nombre, telefono, colegiado_activo').eq('usuario_id', user.id).not('nombre', 'is', null).limit(1);
+  let nombre = cert.recipient_name || (existing?.[0]?.nombre) || '';
+  let telefono = existing?.[0]?.telefono || '';
+  const colegiadoActivo = existing?.[0]?.colegiado_activo || 'Sí';
+  const colegiadoNum = (document.getElementById('avColegiadoNum')?.value || '').trim();
+  if (!nombre) nombre = prompt('Nombre completo (requerido para el registro):') || '';
+  if (!nombre) { showToast('Se requiere nombre para importar.', 'warn'); renderAvCerts(); return; }
+  if (!telefono) {
+    telefono = prompt('Número de teléfono +502 xxxxxxxx (requerido para el registro):') || '';
+    if (!telefono) { showToast('Se requiere teléfono para importar.', 'warn'); renderAvCerts(); return; }
+  }
+  const horas = Number(cert.video_duration) || 1;
+  const creditos = calcCreditos(horas);
+  const fecha = cert.issued_at ? cert.issued_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const payload = {
+    usuario_id: user.id, nombre, telefono,
+    colegiado_numero: colegiadoNum, colegiado_activo: colegiadoActivo,
+    actividad: cert.video_title, institucion: 'CAEDUC - Aula Virtual CPG',
+    tipo: 'Teórica', fecha, horas, creditos,
+    observaciones: 'Importado desde Aula Virtual CPG',
+    hash: cert.certificate_code,
+    archivo_url: null, archivo_mime: null,
+  };
+  const { error } = await sb.from('registros').insert(payload);
+  if (error) { showToast('Error al importar: ' + sbErrMsg(error), 'error'); renderAvCerts(); return; }
+  __AV_IMPORTED_HASHES.add(cert.certificate_code);
+  renderAvCerts();
+  showToast('¡Certificado importado correctamente!', 'info');
+  await loadAndRender();
+}
