@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
   <style>.modal{display:none}</style>
-  <link rel="stylesheet" href="./styles.css?v=4" />
+  <link rel="stylesheet" href="./styles.css?v=5" />
   <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
@@ -18,7 +18,7 @@
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
-  <script src="./script.js?v=21" defer></script>
+  <script src="./script.js?v=22" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -41,6 +41,13 @@
       <button class="btn nav-btn" id="aulaVirtualNavBtn" type="button" style="display:none;border-color:#3b82f6;color:#3b82f6" title="Ir al Aula Virtual CPG (sesión compartida)">
         <span class="nav-icon">🎓</span> Aula Virtual
       </button>
+      <div class="profile-nav-badge" id="profileNavBadge" style="display:none">
+        <div class="pnb-avatar" id="profileNavAvatar">?</div>
+        <div class="pnb-info">
+          <span class="pnb-name" id="profileNavName"></span>
+          <span class="pnb-colegiado" id="profileNavColegiado"></span>
+        </div>
+      </div>
       <button class="admin-hidden-button" id="openAdminBtn" title="Abrir panel administrador" type="button">●</button>
       <button class="btn nav-btn primary-nav" id="authBtn" type="button">
         <span class="nav-icon">🔐</span> Iniciar sesión
@@ -66,42 +73,86 @@
       </div>
     </section>
 
+    <!-- Sección: completar perfil (primera vez) -->
+    <section class="card profile-setup-card" id="profileSetupSection" style="display:none">
+      <div class="setup-header">
+        <div class="setup-icon">🔐</div>
+        <h2>Completa tu perfil</h2>
+        <p class="muted">Para comenzar, necesitas vincular tu número de colegiado a tu cuenta. <strong>Esta información quedará asociada permanentemente y no podrá modificarse.</strong></p>
+      </div>
+      <div class="setup-form">
+        <label>Número de colegiado <span class="muted">(solo números)</span>
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <input type="text" id="setupColegiadoNum" placeholder="Ej: 4661" inputmode="numeric" maxlength="20" style="flex:1" />
+            <button class="btn primary" id="setupVerificarBtn" type="button">Verificar</button>
+          </div>
+        </label>
+        <div id="setupColegiadoInfo" class="colegiado-info" style="display:none"></div>
+        <div id="setupPersonalFields" style="display:none">
+          <div class="grid" style="margin-top:14px">
+            <label>Nombre completo*
+              <input type="text" id="setupNombre" required maxlength="120" />
+            </label>
+            <label>Teléfono (GT)*
+              <input type="tel" id="setupTelefono" placeholder="+502 55555555" required />
+            </label>
+          </div>
+          <div class="actions" style="margin-top:18px">
+            <button class="btn primary" id="setupGuardarBtn" type="button" style="padding:12px 28px;font-size:15px">Guardar perfil y continuar →</button>
+            <span class="muted" id="setupState"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Barra de estadísticas -->
+    <div class="stats-bar" id="statsBar" style="display:none">
+      <div class="stat-item">
+        <span class="stat-value" id="statCreditos">—</span>
+        <span class="stat-label">Créditos acumulados</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="statActividades">—</span>
+        <span class="stat-label">Actividades registradas</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat-item">
+        <span class="stat-value" id="statAnios">—</span>
+        <span class="stat-label">Años con registros</span>
+      </div>
+    </div>
+
     <!-- Sección: formulario -->
     <section class="card" id="formSection" style="display:none" aria-labelledby="formTitle">
       <h2 id="formTitle">Nueva actividad científico-académica</h2>
       <p class="help">Regla: <strong>1 crédito = 16 horas</strong> (Art. 16 del reglamento).</p>
+
+      <!-- Banner de identidad bloqueada -->
+      <div class="profile-banner" id="profileBannerForm">
+        <div class="pb-avatar" id="profileBannerAvatar">?</div>
+        <div class="pb-info">
+          <div class="pb-name" id="profileBannerName">—</div>
+          <div class="pb-meta">
+            <span class="pb-colegiado" id="profileBannerColegiado">Colegiado —</span>
+            <span class="status-badge activo" id="profileBannerStatus" style="display:none">ACTIVO</span>
+            <span class="pb-lock" title="Número de colegiado vinculado permanentemente">🔒</span>
+          </div>
+        </div>
+      </div>
+
       <form id="registroForm" novalidate>
-        <fieldset class="verification-fieldset" id="verificationFieldset">
-          <legend>① Verificación de colegiado</legend>
-          <label>Número de colegiado* (solo números)
-            <div style="display:flex;gap:8px;align-items:flex-end">
-              <input type="text" name="colegiadoNumero" id="colegiadoNumero" required maxlength="20" autocomplete="off" inputmode="numeric" pattern="\d*" placeholder="Ej: 4661" style="flex:1" />
-              <button type="button" class="btn primary" id="verificarColegiadoBtn" style="white-space:nowrap;padding:10px 16px">Verificar</button>
-            </div>
+        <div class="grid" style="margin-bottom:16px">
+          <label>Nombre completo*
+            <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
           </label>
-          <div id="colegiadoInfo" class="colegiado-info" style="display:none">
-            <div id="colegiadoInfoContent"></div>
-          </div>
-        </fieldset>
+          <label>Celular (GT)*
+            <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
+          </label>
+        </div>
 
-        <fieldset class="form-fieldset" id="datosPersonalesFieldset" disabled>
-          <legend>② Datos personales</legend>
-          <div class="grid">
-            <label>Nombre completo*
-              <input type="text" name="nombre" id="nombre" required maxlength="120" autocomplete="name" />
-            </label>
-            <label>Celular (GT) *
-              <input type="tel" name="telefono" id="telefono" required placeholder="+502 55555555" inputmode="numeric" pattern="(?:\+?502)?\s?\d{8}" autocomplete="tel-national" />
-            </label>
-            <label>¿Colegiado activo?*
-              <input type="text" name="colegiadoActivo" id="colegiadoActivo" readonly required placeholder="Se llena automáticamente" style="cursor:not-allowed;background:#0a0f24;color:var(--muted)" />
-              <input type="hidden" id="colegiadoActivoHidden" name="colegiadoActivoValue" />
-            </label>
-          </div>
-        </fieldset>
-
-        <fieldset class="form-fieldset" id="actividadFieldset" disabled>
-          <legend>③ Datos de la actividad</legend>
+        <fieldset class="form-fieldset" id="actividadFieldset" style="opacity:1">
+          <legend>Datos de la actividad</legend>
           <div class="grid">
             <label>Nombre de la actividad*
               <input type="text" name="actividad" id="actividad" required maxlength="140" />
@@ -174,20 +225,18 @@
       </div>
     </section>
 
-    <!-- SECCIÓN: Importar desde Aula Virtual -->
+    <!-- SECCIÓN: Certificados Aula Virtual -->
     <section class="card" id="aulavirtualSection" style="display:none" aria-labelledby="avTitle">
-      <h2 id="avTitle" style="display:flex;align-items:center;gap:8px;cursor:pointer" id="avToggleHeader">
+      <h2 id="avTitle" style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <span id="avChevron" style="font-size:12px;transition:transform .2s">▶</span>
-        Aula Virtual CPG — Importar certificados
+        Aula Virtual CPG — Mis certificados
+        <span id="avCountBadge" style="font-size:13px;font-weight:500;color:var(--primary)"></span>
       </h2>
       <div id="avBody" style="display:none">
-        <p class="muted" style="margin:0 0 14px">Importa los certificados que hayas ganado en el Aula Virtual CPG como créditos académicos registrados automáticamente.</p>
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-          <label style="flex:1;min-width:160px">Número de colegiado
-            <input type="text" id="avColegiadoNum" placeholder="Ej: 4661" inputmode="numeric" pattern="\d*" maxlength="20" />
-          </label>
-          <button class="btn primary" id="avBuscarBtn" type="button">Buscar certificados</button>
-          <span class="muted" id="avStatus"></span>
+        <p class="muted" style="margin:0 0 14px">Certificados obtenidos en el Aula Virtual CPG disponibles para importar como créditos académicos.</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <span class="muted" id="avStatus">—</span>
+          <button class="btn" id="avRefreshBtn" type="button" style="padding:6px 14px;font-size:13px">↻ Actualizar</button>
         </div>
         <div class="table-wrap" id="avResults" style="display:none">
           <table class="table">

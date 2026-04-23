@@ -53,6 +53,8 @@ let __USER_ROWS_CACHE = [];
 let __CONSOLIDADO_PATH = null;
 let __ENTRY_ACCEPTED = false;
 let __APP_CONFIG = { video_guia_url: 'https://youtu.be/zitwRCdNgQc', reglamento_path: null };
+let __USER_PROFILE = null; // { nombre, telefono, colegiado_numero, colegiado_activo, is_admin }
+let __SETUP_VERIFIED_DATA = null; // temporal durante el setup
 
 /* PDF.js worker */
 window.addEventListener('load', () => {
@@ -209,6 +211,94 @@ function limpiarDatosRapidos(userId) {
   } catch {}
 }
 
+/* =======================================================
+   Perfil de usuario (perfiles table)
+======================================================= */
+async function loadUserProfile(userId) {
+  const sb = getSupabaseClient();
+  if (!sb || !userId) return null;
+  try {
+    const { data } = await sb.from('perfiles')
+      .select('nombre, telefono, colegiado_numero, colegiado_activo, is_admin')
+      .eq('user_id', userId)
+      .maybeSingle();
+    __USER_PROFILE = data || null;
+    return __USER_PROFILE;
+  } catch { return null; }
+}
+
+async function saveUserProfile(userId, profileData) {
+  const sb = getSupabaseClient();
+  if (!sb || !userId) return new Error('Sin cliente');
+  try {
+    const { error } = await sb.from('perfiles')
+      .upsert({ user_id: userId, ...profileData }, { onConflict: 'user_id' });
+    if (!error) __USER_PROFILE = { ...(__USER_PROFILE || {}), ...profileData };
+    return error;
+  } catch (e) { return e; }
+}
+
+function applyProfileToUI(profile) {
+  if (!profile) return;
+  const inicial = (profile.nombre || '?').charAt(0).toUpperCase();
+  const colegNum = profile.colegiado_numero || '—';
+  const isActivo = profile.colegiado_activo === true || profile.colegiado_activo === 'Sí';
+
+  // Badge en la nav
+  const badge = document.getElementById('profileNavBadge');
+  const navAvatar = document.getElementById('profileNavAvatar');
+  const navName = document.getElementById('profileNavName');
+  const navCol = document.getElementById('profileNavColegiado');
+  if (badge) badge.style.display = '';
+  if (navAvatar) navAvatar.textContent = inicial;
+  if (navName) navName.textContent = profile.nombre || '—';
+  if (navCol) navCol.textContent = 'Colegiado ' + colegNum;
+
+  // Banner en el formulario
+  const bannerAvatar = document.getElementById('profileBannerAvatar');
+  const bannerName = document.getElementById('profileBannerName');
+  const bannerCol = document.getElementById('profileBannerColegiado');
+  const bannerStatus = document.getElementById('profileBannerStatus');
+  if (bannerAvatar) bannerAvatar.textContent = inicial;
+  if (bannerName) bannerName.textContent = profile.nombre || '—';
+  if (bannerCol) bannerCol.textContent = 'Colegiado ' + colegNum;
+  if (bannerStatus) {
+    bannerStatus.style.display = '';
+    bannerStatus.textContent = isActivo ? 'ACTIVO' : 'INACTIVO';
+    bannerStatus.className = 'status-badge ' + (isActivo ? 'activo' : 'inactivo');
+  }
+
+  // Pre-rellenar campos del formulario
+  const nombreEl = document.getElementById('nombre');
+  const telefonoEl = document.getElementById('telefono');
+  if (nombreEl && !nombreEl.value && profile.nombre) nombreEl.value = profile.nombre;
+  if (telefonoEl && !telefonoEl.value && profile.telefono) telefonoEl.value = profile.telefono;
+}
+
+function showProfileSetupUI() {
+  if (formSection) formSection.style.display = 'none';
+  if (histSection) histSection.style.display = 'none';
+  if (aulavirtualSection) aulavirtualSection.style.display = 'none';
+  if (loginRequiredSection) loginRequiredSection.style.display = 'none';
+  if (adminSection) adminSection.style.display = 'none';
+  const setup = document.getElementById('profileSetupSection');
+  if (setup) setup.style.display = '';
+  const bar = document.getElementById('statsBar');
+  if (bar) bar.style.display = 'none';
+}
+
+function showMainDashboardUI() {
+  if (formSection) formSection.style.display = '';
+  if (histSection) histSection.style.display = '';
+  if (aulavirtualSection) aulavirtualSection.style.display = '';
+  if (loginRequiredSection) loginRequiredSection.style.display = 'none';
+  if (adminSection) adminSection.style.display = 'none';
+  const setup = document.getElementById('profileSetupSection');
+  if (setup) setup.style.display = 'none';
+  const bar = document.getElementById('statsBar');
+  if (bar) bar.style.display = '';
+}
+
 async function precargarDatosDesdeUltimoRegistro(userId) {
   const sb = getSupabaseClient();
   if (!sb || !userId) return;
@@ -319,14 +409,7 @@ const aulavirtualSection = document.getElementById('aulavirtualSection');
 function showNav() { if (mainNav) mainNav.style.display = 'flex'; }
 function hideNav() { if (mainNav) mainNav.style.display = 'none'; }
 
-function showAuthenticatedUI() {
-  if (formSection) formSection.style.display = '';
-  if (histSection) histSection.style.display = '';
-  if (aulavirtualSection) aulavirtualSection.style.display = '';
-  if (loginRequiredSection) loginRequiredSection.style.display = 'none';
-  if (adminSection) adminSection.style.display = 'none';
-  setTimeout(() => { try { restaurarVerificacionCacheada(); } catch {} }, 100);
-}
+function showAuthenticatedUI() { showMainDashboardUI(); }
 
 function showUnauthenticatedUI() {
   if (formSection) formSection.style.display = 'none';
@@ -334,6 +417,12 @@ function showUnauthenticatedUI() {
   if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = '';
   if (adminSection) adminSection.style.display = 'none';
+  const setup = document.getElementById('profileSetupSection');
+  if (setup) setup.style.display = 'none';
+  const bar = document.getElementById('statsBar');
+  if (bar) bar.style.display = 'none';
+  const badge = document.getElementById('profileNavBadge');
+  if (badge) badge.style.display = 'none';
 }
 
 function hideAllContent() {
@@ -342,6 +431,10 @@ function hideAllContent() {
   if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = 'none';
   if (adminSection) adminSection.style.display = 'none';
+  const setup = document.getElementById('profileSetupSection');
+  if (setup) setup.style.display = 'none';
+  const bar = document.getElementById('statsBar');
+  if (bar) bar.style.display = 'none';
 }
 
 const aulaVirtualNavBtn = document.getElementById('aulaVirtualNavBtn');
@@ -364,10 +457,8 @@ aulaVirtualNavBtn?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) return;
   const { data: { session } } = await sb.auth.getSession();
   if (!session) { showToast('Inicia sesión primero.', 'warn'); return; }
-  // Obtener número de colegiado y nombre del usuario desde sus registros
-  const { data: rows } = await sb.from('registros').select('colegiado_numero, nombre').eq('usuario_id', session.user.id).not('colegiado_numero', 'is', null).limit(1);
-  const colegiado = rows?.[0]?.colegiado_numero || '';
-  const nombre = rows?.[0]?.nombre || '';
+  const colegiado = __USER_PROFILE?.colegiado_numero || '';
+  const nombre = __USER_PROFILE?.nombre || '';
   const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
   const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
   window.open(`https://aulavirtualcpg.org/${query}#${hash}`, '_blank');
@@ -381,8 +472,36 @@ async function applyUIState() {
   const currentUser = await getCurrentUser();
   const isLoggedIn = !!currentUser;
   updateAuthButton(isLoggedIn);
-  if (isLoggedIn) { showAuthenticatedUI(); await loadAndRender(); }
-  else { showUnauthenticatedUI(); }
+  if (!isLoggedIn) { showUnauthenticatedUI(); return; }
+
+  const profile = await loadUserProfile(currentUser.id);
+
+  // SSO desde Aula Virtual: si viene sso_colegiado y no hay perfil, auto-guardarlo
+  if (!profile?.colegiado_numero) {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const ssoColegiado = urlParams.get('sso_colegiado');
+      const ssoNombre = decodeURIComponent(urlParams.get('sso_nombre') || '');
+      if (ssoColegiado) {
+        await saveUserProfile(currentUser.id, {
+          colegiado_numero: ssoColegiado,
+          nombre: ssoNombre || '',
+          colegiado_activo: true,
+        });
+        window.history.replaceState(null, '', window.location.pathname);
+        await loadUserProfile(currentUser.id);
+      }
+    } catch {}
+  }
+
+  if (__USER_PROFILE?.colegiado_numero) {
+    applyProfileToUI(__USER_PROFILE);
+    showMainDashboardUI();
+    await loadAndRender();
+    loadAulaVirtualCerts(); // carga en segundo plano
+  } else {
+    showProfileSetupUI();
+  }
 }
 
 /* =======================================================
@@ -391,12 +510,15 @@ async function applyUIState() {
 let isSuperAdmin = false;
 
 function openAdminSection() {
-  // Hide main content, show admin section
   if (formSection) formSection.style.display = 'none';
   if (histSection) histSection.style.display = 'none';
   if (aulavirtualSection) aulavirtualSection.style.display = 'none';
   if (loginRequiredSection) loginRequiredSection.style.display = 'none';
   if (adminSection) adminSection.style.display = '';
+  const setup = document.getElementById('profileSetupSection');
+  if (setup) setup.style.display = 'none';
+  const bar = document.getElementById('statsBar');
+  if (bar) bar.style.display = 'none';
   // Load config fields
   const cfgVideo = document.getElementById('cfgVideoUrl');
   if (cfgVideo && __APP_CONFIG.video_guia_url) cfgVideo.value = __APP_CONFIG.video_guia_url;
@@ -825,6 +947,7 @@ authBtn?.addEventListener('click', async () => {
     const userId = currentUser.id;
     const { error } = await sb.auth.signOut();
     if (error) { showToast('No se pudo cerrar sesión: ' + sbErrMsg(error), 'error'); return; }
+    __USER_PROFILE = null;
     limpiarDatosRapidos(userId);
     try { form?.reset(); } catch {}
     if (preview) preview.innerHTML = '';
@@ -869,13 +992,12 @@ doSignup?.addEventListener('click', async () => {
 doLogin?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
   if (authState) authState.textContent = 'Ingresando...';
-  const { error } = await sb.auth.signInWithPassword({ email: (authEmail?.value || '').trim(), password: authPass2?.value || '' });
+  const { data: loginData, error } = await sb.auth.signInWithPassword({ email: (authEmail?.value || '').trim(), password: authPass2?.value || '' });
   if (error) { if (authState) authState.textContent = 'Error: ' + sbErrMsg(error); return; }
   if (authState) authState.textContent = 'OK';
   closeModal(authModal);
   updateAuthButton(true);
-  showAuthenticatedUI();
-  await loadAndRender();
+  // La carga del perfil y routing la maneja onAuthStateChange automáticamente
 });
 
 doResetPassword?.addEventListener('click', async () => {
@@ -893,9 +1015,20 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session) => {
   __CACHED_SESSION = session || null;
   const isLoggedIn = !!session?.user;
   updateAuthButton(isLoggedIn);
-  if (__ENTRY_ACCEPTED) {
-    if (isLoggedIn) { showAuthenticatedUI(); await loadAndRender(); }
-    else { showUnauthenticatedUI(); }
+  if (!__ENTRY_ACCEPTED) return;
+  if (!isLoggedIn) {
+    __USER_PROFILE = null;
+    showUnauthenticatedUI();
+    return;
+  }
+  const profile = await loadUserProfile(session.user.id);
+  if (profile?.colegiado_numero) {
+    applyProfileToUI(profile);
+    showMainDashboardUI();
+    await loadAndRender();
+    loadAulaVirtualCerts();
+  } else {
+    showProfileSetupUI();
   }
 });
 
@@ -918,8 +1051,8 @@ async function loadAndRender() {
     }
     userId = session.session.user.id;
   }
-  try { precargarDesdeLocalStorage(userId); } catch {}
-  try { await precargarDatosDesdeUltimoRegistro(userId); } catch {}
+  if (__USER_PROFILE) { try { applyProfileToUI(__USER_PROFILE); } catch {} }
+  else { try { precargarDesdeLocalStorage(userId); } catch {}; try { await precargarDatosDesdeUltimoRegistro(userId); } catch {} }
   let q = sb.from('registros').select('*').eq('usuario_id', userId).order('created_at', { ascending: false });
   if (__HAS_DELETED_AT) q = q.is('deleted_at', null);
   const { data, error } = await q;
@@ -933,11 +1066,21 @@ async function loadAndRender() {
 
 function updateUserTotalsUI(rows) {
   const totalCred = (rows || []).reduce((acc, r) => acc + (Number(r.creditos) || 0), 0);
-  if (totalCreditosLabel) totalCreditosLabel.textContent = `Total créditos acumulados: ${Math.round(totalCred*100)/100}`;
+  const totalCredRounded = Math.round(totalCred * 100) / 100;
+  if (totalCreditosLabel) totalCreditosLabel.textContent = `Total créditos acumulados: ${totalCredRounded}`;
   const enabled = (rows && rows.length > 0);
   if (downloadConsolidadoBtn) downloadConsolidadoBtn.disabled = !enabled;
   if (downloadByYearBtn) downloadByYearBtn.disabled = !enabled;
   if (!enabled) { hideYearSelector(); if (consolidadoState) consolidadoState.textContent = '—'; }
+
+  // Actualizar stats bar
+  const years = new Set((rows || []).map(r => new Date(r.fecha || r.created_at || '').getFullYear()).filter(y => y && !isNaN(y)));
+  const statCred = document.getElementById('statCreditos');
+  const statAct = document.getElementById('statActividades');
+  const statAnios = document.getElementById('statAnios');
+  if (statCred) statCred.textContent = totalCredRounded;
+  if (statAct) statAct.textContent = (rows || []).length;
+  if (statAnios) statAnios.textContent = years.size || 0;
 }
 
 function getYearsFromRows(rows) {
@@ -1091,19 +1234,18 @@ form?.addEventListener('submit', async e => {
     if (!user) { showToast('Inicia sesión para registrar.', 'error'); return; }
     const nombre = (document.getElementById('nombre')?.value || '').trim();
     const telefono = (document.getElementById('telefono')?.value || '').trim();
-    const colegiadoNumero = (document.getElementById('colegiadoNumero')?.value || '').trim();
-    const colegiadoActivo = (document.getElementById('colegiadoActivo')?.value || '').trim();
+    const colegiadoNumero = __USER_PROFILE?.colegiado_numero || '';
+    const colegiadoActivo = (__USER_PROFILE?.colegiado_activo === true || __USER_PROFILE?.colegiado_activo === 'Sí') ? 'Sí' : 'No';
     const actividad = (document.getElementById('actividad')?.value || '').trim();
     const institucion = (document.getElementById('institucion')?.value || '').trim();
     const tipo = document.getElementById('tipo')?.value;
     const fecha = document.getElementById('fecha')?.value;
     const horas = Number(document.getElementById('horas')?.value);
     const observaciones = (obsEl?.value || '').trim();
-    if (!nombre || !telefono || !colegiadoNumero || !colegiadoActivo || !actividad || !institucion || !tipo || !fecha || !horas) {
-      showToast('Complete todos los campos obligatorios (*), incluido la verificación del colegiado.', 'error'); return;
+    if (!colegiadoNumero) { showToast('No se encontró tu número de colegiado. Recarga la página.', 'error'); return; }
+    if (!nombre || !telefono || !actividad || !institucion || !tipo || !fecha || !horas) {
+      showToast('Complete todos los campos obligatorios (*).', 'error'); return;
     }
-    if (!__COLEGIADO_VERIFIED) { showToast('Debes verificar tu número de colegiado. Presiona "Verificar".', 'error'); try { colegiadoEl?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {} return; }
-    if (!/^\d+$/.test(colegiadoNumero)) { showToast('El número de colegiado solo debe contener números.', 'error'); return; }
     if (!phoneValidGT(telefono)) { showToast('Teléfono inválido (+502 ########)', 'error'); return; }
     if (!withinFiveYears(fecha)) { showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
     if (!(horas >= 0.5 && horas <= 200)) { showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
@@ -1185,13 +1327,20 @@ form?.addEventListener('submit', async e => {
     }
     if (!inserted) { showToast('No se pudo confirmar el registro. Revisa "Mis registros" — es posible que se haya guardado.', 'error'); await loadAndRender().catch(() => {}); return; }
     guardarDatosRapidos(user.id, nombre, telefono, colegiadoNumero);
+    // Actualizar perfil si cambió nombre o teléfono
+    const profileUpdates = {};
+    if (nombre && nombre !== __USER_PROFILE?.nombre) profileUpdates.nombre = nombre;
+    if (telefono && telefono !== __USER_PROFILE?.telefono) profileUpdates.telefono = telefono;
+    if (Object.keys(profileUpdates).length) {
+      saveUserProfile(user.id, profileUpdates).catch(() => {});
+      applyProfileToUI(__USER_PROFILE);
+    }
     if (submitBtn) submitBtn.innerHTML = '<span class="verifying-spinner"></span> Generando constancia…';
     try { await Promise.race([generarConstanciaPDF(inserted, fileRef), new Promise((_, reject) => setTimeout(() => reject(new Error('PDF timeout')), 15000))]); }
     catch (pdfErr) { console.error('PDF error:', pdfErr); showToast('Registro guardado ✅, pero la constancia no pudo generarse. Puedes regenerarla desde el historial.', 'warn'); }
     showToast('✅ Registro guardado y constancia generada.');
     form.reset(); if (preview) preview.innerHTML = ''; if (creditosEl) creditosEl.value = '';
-    try { precargarDesdeLocalStorage(user.id); } catch {}
-    try { restaurarVerificacionCacheada(); } catch {}
+    if (__USER_PROFILE) { try { applyProfileToUI(__USER_PROFILE); } catch {} }
     fileRef = null; markUploaderError(false);
     await loadAndRender().catch(e => console.warn('Error recargando historial:', e));
     try { await actualizarConsolidadoEnStorage(user.id, __USER_ROWS_CACHE); } catch (e) { console.warn('No se pudo actualizar consolidado:', e); }
@@ -1622,6 +1771,91 @@ async function getQrDataUrl(text, size = 96) {
 }
 
 /* =======================================================
+   Setup de perfil (primera vez)
+======================================================= */
+document.getElementById('setupVerificarBtn')?.addEventListener('click', async () => {
+  const numero = (document.getElementById('setupColegiadoNum')?.value || '').trim();
+  if (!numero || !/^\d+$/.test(numero)) { showToast('Ingresa un número de colegiado válido (solo números).', 'warn'); return; }
+  const btn = document.getElementById('setupVerificarBtn');
+  const infoDiv = document.getElementById('setupColegiadoInfo');
+  const personalFields = document.getElementById('setupPersonalFields');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="verifying-spinner"></span>Verificando…'; }
+  if (infoDiv) { infoDiv.style.display = 'block'; infoDiv.className = 'colegiado-info'; infoDiv.innerHTML = '<span class="verifying-spinner"></span> Consultando en la base del Colegio de Psicólogos…'; }
+  __SETUP_VERIFIED_DATA = null;
+  try {
+    const res = await fetch(window.SB_URL + '/functions/v1/consultar-colegiado', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: numero })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      if (infoDiv) { infoDiv.className = 'colegiado-info status-error'; infoDiv.innerHTML = `<strong>⚠️ ${sanitize(data.error || 'No se pudo verificar')}</strong><br><span class="muted">Verifica que el número sea correcto.</span>`; }
+      if (personalFields) personalFields.style.display = 'none';
+      return;
+    }
+    const estatus = (data.estatus || '').toUpperCase();
+    const isActivo = estatus === 'ACTIVO';
+    __SETUP_VERIFIED_DATA = { numero, nombre: data.nombre || '', activo: isActivo };
+    if (infoDiv) {
+      infoDiv.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`;
+      infoDiv.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <strong>Colegiado No. ${sanitize(numero)}</strong>
+          <span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${estatus}</span>
+        </div>
+        ${data.nombre ? `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>` : ''}
+        ${!isActivo ? '<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como INACTIVO. Puedes continuar, pero verifica con el CPG.</p>' : ''}`;
+    }
+    const setupNombre = document.getElementById('setupNombre');
+    if (setupNombre && data.nombre) setupNombre.value = data.nombre;
+    if (personalFields) personalFields.style.display = '';
+  } catch (e) {
+    if (infoDiv) { infoDiv.className = 'colegiado-info status-error'; infoDiv.innerHTML = '<strong>⚠️ Error de conexión.</strong> Intenta de nuevo.'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Verificar'; }
+  }
+});
+
+document.getElementById('setupGuardarBtn')?.addEventListener('click', async () => {
+  if (!__SETUP_VERIFIED_DATA) { showToast('Primero verifica tu número de colegiado.', 'warn'); return; }
+  const nombre = (document.getElementById('setupNombre')?.value || '').trim();
+  const telefono = (document.getElementById('setupTelefono')?.value || '').trim();
+  if (!nombre) { showToast('Ingresa tu nombre completo.', 'warn'); return; }
+  if (!telefono || !phoneValidGT(telefono)) { showToast('Ingresa un teléfono válido (+502 ########).', 'warn'); return; }
+
+  const stateEl = document.getElementById('setupState');
+  const btn = document.getElementById('setupGuardarBtn');
+  if (stateEl) stateEl.textContent = 'Guardando…';
+  if (btn) btn.disabled = true;
+
+  const user = __CACHED_SESSION?.user;
+  if (!user) { showToast('Sesión expirada. Recarga la página.', 'error'); if (btn) btn.disabled = false; return; }
+
+  const error = await saveUserProfile(user.id, {
+    colegiado_numero: __SETUP_VERIFIED_DATA.numero,
+    colegiado_activo: __SETUP_VERIFIED_DATA.activo,
+    nombre,
+    telefono,
+  });
+
+  if (error) {
+    if (stateEl) stateEl.textContent = 'Error: ' + sbErrMsg(error);
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  showToast('¡Perfil guardado! Bienvenido al sistema.', 'info');
+  applyProfileToUI(__USER_PROFILE);
+  showMainDashboardUI();
+  await loadAndRender();
+  loadAulaVirtualCerts();
+});
+
+// Permitir Enter en el input de colegiado de setup
+document.getElementById('setupColegiadoNum')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('setupVerificarBtn')?.click(); }
+});
+
+/* =======================================================
    Carga inicial
 ======================================================= */
 (async function initAuthButton() {
@@ -1650,7 +1884,7 @@ function getAulaVirtualClient() {
 let __AV_CERTS = [];
 let __AV_IMPORTED_HASHES = new Set();
 
-// Collapsible toggle
+// Collapsible toggle Aula Virtual
 (function setupAvToggle() {
   const header = document.querySelector('#aulavirtualSection h2');
   const body = document.getElementById('avBody');
@@ -1660,33 +1894,18 @@ let __AV_IMPORTED_HASHES = new Set();
     const open = body.style.display !== 'none';
     body.style.display = open ? 'none' : '';
     if (chevron) chevron.style.transform = open ? '' : 'rotate(90deg)';
-    if (!open) tryPrefillAvColegiado();
   });
 })();
 
-async function tryPrefillAvColegiado() {
-  const input = document.getElementById('avColegiadoNum');
-  if (!input || input.value.trim()) return;
-  const sb = getSupabaseClient(); if (!sb) return;
-  const user = __CACHED_SESSION?.user; if (!user) return;
-  const { data } = await sb.from('registros').select('colegiado_numero').eq('usuario_id', user.id).not('colegiado_numero', 'is', null).limit(1);
-  if (data?.[0]?.colegiado_numero) input.value = data[0].colegiado_numero;
-}
-
-document.getElementById('avBuscarBtn')?.addEventListener('click', loadAulaVirtualCerts);
+document.getElementById('avRefreshBtn')?.addEventListener('click', loadAulaVirtualCerts);
 
 async function loadAulaVirtualCerts() {
   const sb = getSupabaseClient(); if (!sb) return;
-  const user = __CACHED_SESSION?.user; if (!user) { showToast('Inicia sesión primero.', 'warn'); return; }
+  const user = __CACHED_SESSION?.user; if (!user) return;
   const avStatus = document.getElementById('avStatus');
   const avResults = document.getElementById('avResults');
-  let colegiadoNum = (document.getElementById('avColegiadoNum')?.value || '').trim();
-  if (!colegiadoNum) {
-    const { data } = await sb.from('registros').select('colegiado_numero').eq('usuario_id', user.id).not('colegiado_numero', 'is', null).limit(1);
-    colegiadoNum = data?.[0]?.colegiado_numero || '';
-    if (document.getElementById('avColegiadoNum') && colegiadoNum) document.getElementById('avColegiadoNum').value = colegiadoNum;
-  }
-  if (!colegiadoNum) { if (avStatus) avStatus.textContent = 'Ingresa tu número de colegiado.'; return; }
+  const colegiadoNum = __USER_PROFILE?.colegiado_numero || '';
+  if (!colegiadoNum) { if (avStatus) avStatus.textContent = 'Sin número de colegiado vinculado.'; return; }
   if (avStatus) avStatus.textContent = 'Buscando…';
   const avSb = getAulaVirtualClient(); if (!avSb) { if (avStatus) avStatus.textContent = 'Error de conexión.'; return; }
   const { data: certs, error } = await avSb
@@ -1705,7 +1924,12 @@ async function loadAulaVirtualCerts() {
   __AV_IMPORTED_HASHES = importedHashes;
   renderAvCerts();
   if (avResults) avResults.style.display = __AV_CERTS.length ? '' : 'none';
-  if (avStatus) avStatus.textContent = __AV_CERTS.length ? `${__AV_CERTS.length} certificado(s) encontrado(s)` : 'Sin certificados en el Aula Virtual para este número.';
+  const pending = __AV_CERTS.filter(c => !__AV_IMPORTED_HASHES.has(c.certificate_code)).length;
+  if (avStatus) avStatus.textContent = __AV_CERTS.length
+    ? `${__AV_CERTS.length} certificado(s) — Colegiado ${colegiadoNum}`
+    : `Sin certificados en el Aula Virtual para el colegiado ${colegiadoNum}.`;
+  const countBadge = document.getElementById('avCountBadge');
+  if (countBadge) countBadge.textContent = pending > 0 ? ` (${pending} por importar)` : '';
 }
 
 function renderAvCerts() {
@@ -1741,17 +1965,15 @@ async function importAvCert(certCode) {
   if (!cert) return;
   const sb = getSupabaseClient(); if (!sb) return;
   const user = __CACHED_SESSION?.user; if (!user) return;
-  // Get user's existing datos personales
-  const { data: existing } = await sb.from('registros').select('nombre, telefono, colegiado_activo').eq('usuario_id', user.id).not('nombre', 'is', null).limit(1);
-  let nombre = cert.recipient_name || (existing?.[0]?.nombre) || '';
-  let telefono = existing?.[0]?.telefono || '';
-  const colegiadoActivo = existing?.[0]?.colegiado_activo || 'Sí';
-  const colegiadoNum = (document.getElementById('avColegiadoNum')?.value || '').trim();
-  if (!nombre) nombre = prompt('Nombre completo (requerido para el registro):') || '';
-  if (!nombre) { showToast('Se requiere nombre para importar.', 'warn'); renderAvCerts(); return; }
-  if (!telefono) {
-    telefono = prompt('Número de teléfono +502 xxxxxxxx (requerido para el registro):') || '';
-    if (!telefono) { showToast('Se requiere teléfono para importar.', 'warn'); renderAvCerts(); return; }
+
+  const nombre = __USER_PROFILE?.nombre || cert.recipient_name || '';
+  const telefono = __USER_PROFILE?.telefono || '';
+  const colegiadoActivo = (__USER_PROFILE?.colegiado_activo === true || __USER_PROFILE?.colegiado_activo === 'Sí') ? 'Sí' : 'No';
+  const colegiadoNum = __USER_PROFILE?.colegiado_numero || '';
+
+  if (!nombre || !telefono || !colegiadoNum) {
+    showToast('Completa tu perfil antes de importar certificados.', 'warn');
+    renderAvCerts(); return;
   }
   const horas = Number(cert.video_duration) || 1;
   const creditos = calcCreditos(horas);
