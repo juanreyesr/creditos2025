@@ -55,6 +55,8 @@ let __ENTRY_ACCEPTED = false;
 let __APP_CONFIG = { video_guia_url: 'https://youtu.be/zitwRCdNgQc', reglamento_path: null };
 let __USER_PROFILE = null; // { nombre, telefono, colegiado_numero, colegiado_activo, is_admin }
 let __SETUP_VERIFIED_DATA = null; // temporal durante el setup
+let __AUTH_MODAL_COLEGIADO_DATA = null; // temporal durante el flujo de login
+const GUEST_COLEGIADO = '100000'; // número de prueba que salta verificación CPG
 
 /* PDF.js worker */
 window.addEventListener('load', () => {
@@ -388,6 +390,20 @@ const doLogin = document.getElementById('doLogin');
 const doSignup = document.getElementById('doSignup');
 const doResetPassword = document.getElementById('doResetPassword');
 const authState = document.getElementById('authState');
+// Auth modal — paso 1 (colegiado)
+const authStep1 = document.getElementById('authStep1');
+const authStep2 = document.getElementById('authStep2');
+const authColegiadoNum = document.getElementById('authColegiadoNum');
+const authVerificarBtn = document.getElementById('authVerificarBtn');
+const authColegiadoInfo = document.getElementById('authColegiadoInfo');
+const authProceedBtn = document.getElementById('authProceedBtn');
+const authBackBtn = document.getElementById('authBackBtn');
+const authVerifiedName = document.getElementById('authVerifiedName');
+const authVerifiedStatus = document.getElementById('authVerifiedStatus');
+// Auth modal — estado correo enviado
+const authLoginForm = document.getElementById('authLoginForm');
+const authSignupSent = document.getElementById('authSignupSent');
+const authVerifiedBanner = document.getElementById('authVerifiedBanner');
 
 // Entry modal
 const entryModal = document.getElementById('entryModal');
@@ -461,7 +477,7 @@ aulaVirtualNavBtn?.addEventListener('click', async () => {
   const nombre = __USER_PROFILE?.nombre || '';
   const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
   const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
-  window.open(`https://aulavirtualcpg.org/${query}#${hash}`, '_blank');
+  window.location.href = `https://aulavirtualcpg.org/${query}#${hash}`;
 });
 
 async function applyUIState() {
@@ -476,7 +492,7 @@ async function applyUIState() {
 
   const profile = await loadUserProfile(currentUser.id);
 
-  // SSO desde Aula Virtual: si viene sso_colegiado y no hay perfil, auto-guardarlo
+  // SSO desde Aula Virtual o pendingColData (Google OAuth redirect): si no hay perfil, auto-guardarlo
   if (!profile?.colegiado_numero) {
     try {
       const urlParams = new URLSearchParams(window.location.search);
@@ -489,6 +505,9 @@ async function applyUIState() {
           colegiado_activo: true,
         });
         window.history.replaceState(null, '', window.location.pathname);
+        await loadUserProfile(currentUser.id);
+      } else {
+        await handlePostAuthColData(currentUser.id);
         await loadUserProfile(currentUser.id);
       }
     } catch {}
@@ -729,14 +748,8 @@ entryAccept?.addEventListener('click', async () => {
   await applyUIState();
 });
 
-loginRequiredBtn?.addEventListener('click', () => { openModal(authModal); });
-signupRequiredBtn?.addEventListener('click', () => {
-  openModal(authModal);
-  if (authEmail) authEmail.value = '';
-  if (authPass2) authPass2.value = '';
-  if (authState) authState.textContent = 'Completa los campos y presiona "Crear cuenta"';
-  setTimeout(() => authEmail?.focus(), 150);
-});
+loginRequiredBtn?.addEventListener('click', () => { openAuthModal(); });
+signupRequiredBtn?.addEventListener('click', () => { openAuthModal(); });
 
 if (horasEl && creditosEl) {
   horasEl.addEventListener('input', () => creditosEl.value = calcCreditos(horasEl.value));
@@ -937,6 +950,34 @@ function handleFile(file) {
 function openModal(m) { m?.setAttribute('aria-hidden', 'false'); }
 function closeModal(m) { m?.setAttribute('aria-hidden', 'true'); if (authState) authState.textContent = '—'; }
 
+function showAuthSignupSentUI(email) {
+  const emailEl = document.getElementById('authSignupEmail');
+  const stateEl = document.getElementById('authResendState');
+  if (emailEl) emailEl.textContent = email || '';
+  if (stateEl) stateEl.textContent = '';
+  if (authLoginForm) authLoginForm.style.display = 'none';
+  if (authSignupSent) authSignupSent.style.display = '';
+}
+function hideAuthSignupSentUI() {
+  if (authLoginForm) authLoginForm.style.display = '';
+  if (authSignupSent) authSignupSent.style.display = 'none';
+}
+
+function resetAuthModal() {
+  if (authStep1) authStep1.style.display = '';
+  if (authStep2) authStep2.style.display = 'none';
+  if (authColegiadoNum) authColegiadoNum.value = '';
+  if (authColegiadoInfo) { authColegiadoInfo.style.display = 'none'; authColegiadoInfo.innerHTML = ''; }
+  if (authProceedBtn) authProceedBtn.style.display = 'none';
+  const guestDiv = document.getElementById('authGuestNameDiv');
+  const guestInput = document.getElementById('authGuestName');
+  if (guestDiv) guestDiv.style.display = 'none';
+  if (guestInput) guestInput.value = '';
+  hideAuthSignupSentUI();
+  __AUTH_MODAL_COLEGIADO_DATA = null;
+}
+function openAuthModal() { resetAuthModal(); openModal(authModal); }
+
 authBtn?.addEventListener('click', async () => {
   const sb = getSupabaseClient();
   if (!sb) { showToast('No se pudo inicializar autenticación.', 'error'); return; }
@@ -963,12 +1004,124 @@ authBtn?.addEventListener('click', async () => {
     showUnauthenticatedUI();
     return;
   }
-  openModal(authModal);
+  openAuthModal();
 });
 
 closeAuth?.addEventListener('click', () => closeModal(authModal));
 authPass2?.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin?.click(); });
 
+// ── Paso 1: verificar colegiado ───────────────────────────────────────────────
+authColegiadoNum?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); authVerificarBtn?.click(); } });
+
+authVerificarBtn?.addEventListener('click', async () => {
+  const numero = (authColegiadoNum?.value || '').trim();
+  if (!numero || !/^\d+$/.test(numero)) { showToast('Ingresa un número de colegiado válido (solo números).', 'warn'); return; }
+
+  // Colegiado de prueba: salta CPG y pide nombre
+  if (numero === GUEST_COLEGIADO) {
+    if (authColegiadoInfo) {
+      authColegiadoInfo.style.display = 'block';
+      authColegiadoInfo.className = 'colegiado-info status-activo';
+      authColegiadoInfo.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <strong>No. ${GUEST_COLEGIADO} — Acceso de prueba</strong>
+          <span class="status-badge activo">ACTIVO</span>
+        </div>
+        <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">Este número no requiere verificación con el CPG.</p>`;
+    }
+    const guestDiv = document.getElementById('authGuestNameDiv');
+    if (guestDiv) guestDiv.style.display = '';
+    if (authProceedBtn) authProceedBtn.style.display = 'none';
+    return;
+  }
+
+  if (authVerificarBtn) { authVerificarBtn.disabled = true; authVerificarBtn.innerHTML = '<span class="verifying-spinner"></span>'; }
+  if (authColegiadoInfo) { authColegiadoInfo.style.display = 'block'; authColegiadoInfo.className = 'colegiado-info'; authColegiadoInfo.innerHTML = '<span class="verifying-spinner"></span> Consultando en el Colegio de Psicólogos…'; }
+  if (authProceedBtn) authProceedBtn.style.display = 'none';
+  __AUTH_MODAL_COLEGIADO_DATA = null;
+  try {
+    const res = await fetch(window.SB_URL + '/functions/v1/consultar-colegiado', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: numero })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      if (authColegiadoInfo) { authColegiadoInfo.className = 'colegiado-info status-error'; authColegiadoInfo.innerHTML = `<strong>⚠️ ${sanitize(data.error || 'No se pudo verificar')}</strong><br><span class="muted">Verifica que el número sea correcto.</span>`; }
+      return;
+    }
+    const estatus = (data.estatus || '').toUpperCase();
+    const isActivo = estatus === 'ACTIVO';
+    __AUTH_MODAL_COLEGIADO_DATA = { numero, nombre: data.nombre || '', activo: isActivo, estatus };
+    if (authColegiadoInfo) {
+      authColegiadoInfo.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`;
+      authColegiadoInfo.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <strong>No. ${sanitize(numero)}</strong>
+          <span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${estatus}</span>
+        </div>
+        ${data.nombre ? `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>` : ''}
+        ${!isActivo ? '<p style="margin:8px 0 0;color:#fca5a5;font-size:12px">⚠️ Estatus INACTIVO. Puedes continuar, pero verifica tu situación con el CPG.</p>' : ''}`;
+    }
+    if (authProceedBtn) authProceedBtn.style.display = '';
+  } catch {
+    if (authColegiadoInfo) { authColegiadoInfo.className = 'colegiado-info status-error'; authColegiadoInfo.innerHTML = '<strong>⚠️ Error de conexión.</strong> Intenta de nuevo.'; }
+  } finally {
+    if (authVerificarBtn) { authVerificarBtn.disabled = false; authVerificarBtn.textContent = 'Verificar'; }
+  }
+});
+
+authProceedBtn?.addEventListener('click', () => {
+  if (!__AUTH_MODAL_COLEGIADO_DATA) return;
+  sessionStorage.setItem('pendingColData', JSON.stringify(__AUTH_MODAL_COLEGIADO_DATA));
+  if (authVerifiedName) authVerifiedName.textContent = __AUTH_MODAL_COLEGIADO_DATA.nombre || `Colegiado No. ${__AUTH_MODAL_COLEGIADO_DATA.numero}`;
+  if (authVerifiedStatus) authVerifiedStatus.textContent = `No. ${__AUTH_MODAL_COLEGIADO_DATA.numero} · ${__AUTH_MODAL_COLEGIADO_DATA.estatus}`;
+  if (authStep1) authStep1.style.display = 'none';
+  if (authStep2) authStep2.style.display = '';
+});
+
+authBackBtn?.addEventListener('click', () => {
+  if (authStep2) authStep2.style.display = 'none';
+  if (authStep1) authStep1.style.display = '';
+  hideAuthSignupSentUI();
+  __AUTH_MODAL_COLEGIADO_DATA = null;
+  sessionStorage.removeItem('pendingColData');
+});
+
+document.getElementById('authGuestNameBtn')?.addEventListener('click', () => {
+  const name = (document.getElementById('authGuestName')?.value || '').trim();
+  if (!name) { showToast('Ingresa tu nombre completo.', 'warn'); return; }
+  __AUTH_MODAL_COLEGIADO_DATA = { numero: GUEST_COLEGIADO, nombre: name, activo: true, estatus: 'ACTIVO' };
+  sessionStorage.setItem('pendingColData', JSON.stringify(__AUTH_MODAL_COLEGIADO_DATA));
+  if (authVerifiedName) authVerifiedName.textContent = name;
+  if (authVerifiedStatus) authVerifiedStatus.textContent = `No. ${GUEST_COLEGIADO} · Acceso de prueba`;
+  const guestDiv = document.getElementById('authGuestNameDiv');
+  if (guestDiv) guestDiv.style.display = 'none';
+  if (authStep1) authStep1.style.display = 'none';
+  if (authStep2) authStep2.style.display = '';
+});
+
+document.getElementById('authGuestName')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); document.getElementById('authGuestNameBtn')?.click(); }
+});
+
+document.getElementById('authResendBtn')?.addEventListener('click', async () => {
+  const sb = getSupabaseClient(); if (!sb) return;
+  const email = (authEmail?.value || '').trim() || document.getElementById('authSignupEmail')?.textContent?.trim();
+  if (!email) return;
+  const btn = document.getElementById('authResendBtn');
+  const stateEl = document.getElementById('authResendState');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  const { error } = await sb.auth.resend({ type: 'signup', email });
+  if (btn) { btn.disabled = false; btn.textContent = 'Reenviar correo de confirmación'; }
+  if (error) { if (stateEl) stateEl.textContent = 'Error: ' + sbErrMsg(error); return; }
+  if (stateEl) stateEl.textContent = '✓ Correo reenviado. Revisa tu bandeja de entrada.';
+});
+
+document.getElementById('authResendBack')?.addEventListener('click', () => {
+  hideAuthSignupSentUI();
+  if (authState) authState.textContent = '—';
+});
+
+// ── Paso 2: autenticación ─────────────────────────────────────────────────────
 document.getElementById('doGoogleLogin')?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
   const { error } = await sb.auth.signInWithOAuth({
@@ -983,17 +1136,32 @@ doSignup?.addEventListener('click', async () => {
   if (authState) authState.textContent = 'Creando cuenta...';
   const email = (authEmail?.value || '').trim();
   const password = authPass2?.value || '';
+  if (!email || !password) { if (authState) authState.textContent = 'Ingresa correo y contraseña.'; return; }
   const redirectTo = `${location.origin}/auth-callback.html`;
-  const { error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
+  const { data: signUpData, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
   if (error) { if (authState) authState.textContent = 'Error: ' + sbErrMsg(error); return; }
-  if (authState) authState.textContent = 'Ya se ha creado tu cuenta, debes verificarla en el enlace que se ha enviado a su correo';
+  if (!signUpData?.session) {
+    showAuthSignupSentUI(email);
+    return;
+  }
+  if (authState) authState.textContent = 'OK';
+  closeModal(authModal);
+  updateAuthButton(true);
 });
 
 doLogin?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
   if (authState) authState.textContent = 'Ingresando...';
-  const { data: loginData, error } = await sb.auth.signInWithPassword({ email: (authEmail?.value || '').trim(), password: authPass2?.value || '' });
-  if (error) { if (authState) authState.textContent = 'Error: ' + sbErrMsg(error); return; }
+  const email = (authEmail?.value || '').trim();
+  const { data: loginData, error } = await sb.auth.signInWithPassword({ email, password: authPass2?.value || '' });
+  if (error) {
+    if (error.message?.toLowerCase().includes('not confirmed') || error.message?.toLowerCase().includes('email not confirmed')) {
+      showAuthSignupSentUI(email);
+      return;
+    }
+    if (authState) authState.textContent = 'Error: ' + sbErrMsg(error);
+    return;
+  }
   if (authState) authState.textContent = 'OK';
   closeModal(authModal);
   updateAuthButton(true);
@@ -1011,6 +1179,32 @@ doResetPassword?.addEventListener('click', async () => {
   if (authState) authState.textContent = 'Te enviamos un enlace para restablecer tu contraseña.';
 });
 
+async function handlePostAuthColData(userId) {
+  const sb = getSupabaseClient();
+  if (!sb || !userId) return;
+  if (__USER_PROFILE?.colegiado_numero) return;
+  const pending = sessionStorage.getItem('pendingColData');
+  if (!pending) return;
+  let colData;
+  try { colData = JSON.parse(pending); } catch { sessionStorage.removeItem('pendingColData'); return; }
+  sessionStorage.removeItem('pendingColData');
+  if (colData.numero !== GUEST_COLEGIADO) {
+    const { data: existing } = await sb.from('perfiles').select('user_id').eq('colegiado_numero', colData.numero).maybeSingle();
+    if (existing?.user_id && existing.user_id !== userId) {
+      await sb.auth.signOut();
+      showToast('Este número de colegiado ya está vinculado a otra cuenta. Contacta al administrador si crees que es un error.', 'error');
+      showUnauthenticatedUI();
+      updateAuthButton(false);
+      return;
+    }
+  }
+  await saveUserProfile(userId, {
+    colegiado_numero: colData.numero,
+    colegiado_activo: colData.activo,
+    nombre: colData.nombre || '',
+  });
+}
+
 getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session) => {
   __CACHED_SESSION = session || null;
   const isLoggedIn = !!session?.user;
@@ -1021,6 +1215,7 @@ getSupabaseClient()?.auth.onAuthStateChange(async (_evt, session) => {
     showUnauthenticatedUI();
     return;
   }
+  await handlePostAuthColData(session.user.id);
   const profile = await loadUserProfile(session.user.id);
   if (profile?.colegiado_numero) {
     applyProfileToUI(profile);

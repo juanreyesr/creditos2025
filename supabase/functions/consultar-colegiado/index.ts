@@ -142,7 +142,42 @@ serve(async (req: Request) => {
       );
     }
 
-    // ── Paso 3: parsear HTML y devolver JSON ──────────────────────────────
+    // ── Paso 3: intentar JSON (WP AJAX) antes que HTML ────────────────────
+    try {
+      const wpJson = JSON.parse(responseText);
+      if (wpJson && typeof wpJson === "object" && "success" in wpJson) {
+        if (!wpJson.success) {
+          const msg = typeof wpJson.data === "string" ? wpJson.data : "Colegiado no encontrado";
+          return new Response(
+            JSON.stringify({ error: msg }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        // success:true — extraer campos del objeto data
+        const d = wpJson.data ?? {};
+        const nombre              = String(d.nombre ?? d.name ?? "").trim();
+        const estatus             = String(d.estatus ?? d.status ?? d.estado ?? "").trim().toUpperCase();
+        const fecha_colegiacion   = String(d.fecha_colegiacion ?? d.fecha ?? "").trim();
+        const ultimo_pago         = String(d.ultimo_pago ?? d.pago ?? "").trim();
+        const cuota_congreso      = String(d.cuota_congreso ?? d.cuota ?? "").trim();
+        const creditos_academicos = String(d.creditos_academicos ?? d.creditos ?? "").trim();
+
+        if (!nombre && !estatus) {
+          return new Response(
+            JSON.stringify({ error: "Colegiado no encontrado", raw: responseText.slice(0, 200) }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ numero: id, nombre, estatus, fecha_colegiacion, ultimo_pago, cuota_congreso, creditos_academicos }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } catch {
+      // No es JSON válido — caer en parseo HTML
+    }
+
+    // ── Paso 4: parsear como HTML (formato legado) ────────────────────────
     const parsed = parseHtml(responseText);
 
     if (!parsed.nombre && !parsed.estatus) {
