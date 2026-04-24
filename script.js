@@ -1773,19 +1773,46 @@ async function getQrDataUrl(text, size = 96) {
 /* =======================================================
    Setup de perfil (primera vez)
 ======================================================= */
-document.getElementById('setupVerificarBtn')?.addEventListener('click', () => {
-  // TEMPORAL: verificación contra CPG desactivada (servicio del colegio no disponible)
+document.getElementById('setupVerificarBtn')?.addEventListener('click', async () => {
   const numero = (document.getElementById('setupColegiadoNum')?.value || '').trim();
   if (!numero || !/^\d+$/.test(numero)) { showToast('Ingresa un número de colegiado válido (solo números).', 'warn'); return; }
+  const btn = document.getElementById('setupVerificarBtn');
   const infoDiv = document.getElementById('setupColegiadoInfo');
   const personalFields = document.getElementById('setupPersonalFields');
-  __SETUP_VERIFIED_DATA = { numero, nombre: '', activo: false };
-  if (infoDiv) {
-    infoDiv.style.display = 'block';
-    infoDiv.className = 'colegiado-info';
-    infoDiv.innerHTML = `<div style="display:flex;align-items:center;gap:10px"><strong>Colegiado No. ${sanitize(numero)}</strong></div><p style="margin:8px 0 0;font-size:13px;color:#94a3b8">La verificación automática está temporalmente desactivada. Ingresa tu nombre y teléfono para continuar.</p>`;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="verifying-spinner"></span>Verificando…'; }
+  if (infoDiv) { infoDiv.style.display = 'block'; infoDiv.className = 'colegiado-info'; infoDiv.innerHTML = '<span class="verifying-spinner"></span> Consultando en la base del Colegio de Psicólogos…'; }
+  __SETUP_VERIFIED_DATA = null;
+  try {
+    const res = await fetch(window.SB_URL + '/functions/v1/consultar-colegiado', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: numero })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      if (infoDiv) { infoDiv.className = 'colegiado-info status-error'; infoDiv.innerHTML = `<strong>⚠️ ${sanitize(data.error || 'No se pudo verificar')}</strong><br><span class="muted">Verifica que el número sea correcto.</span>`; }
+      if (personalFields) personalFields.style.display = 'none';
+      return;
+    }
+    const estatus = (data.estatus || '').toUpperCase();
+    const isActivo = estatus === 'ACTIVO';
+    __SETUP_VERIFIED_DATA = { numero, nombre: data.nombre || '', activo: isActivo };
+    if (infoDiv) {
+      infoDiv.className = `colegiado-info ${isActivo ? 'status-activo' : 'status-inactivo'}`;
+      infoDiv.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <strong>Colegiado No. ${sanitize(numero)}</strong>
+          <span class="status-badge ${isActivo ? 'activo' : 'inactivo'}">${estatus}</span>
+        </div>
+        ${data.nombre ? `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>` : ''}
+        ${!isActivo ? '<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como INACTIVO. Puedes continuar, pero verifica con el CPG.</p>' : ''}`;
+    }
+    const setupNombre = document.getElementById('setupNombre');
+    if (setupNombre && data.nombre) setupNombre.value = data.nombre;
+    if (personalFields) personalFields.style.display = '';
+  } catch (e) {
+    if (infoDiv) { infoDiv.className = 'colegiado-info status-error'; infoDiv.innerHTML = '<strong>⚠️ Error de conexión.</strong> Intenta de nuevo.'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Verificar'; }
   }
-  if (personalFields) personalFields.style.display = '';
 });
 
 document.getElementById('setupGuardarBtn')?.addEventListener('click', async () => {
