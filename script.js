@@ -1268,14 +1268,21 @@ function updateUserTotalsUI(rows) {
   if (downloadByYearBtn) downloadByYearBtn.disabled = !enabled;
   if (!enabled) { hideYearSelector(); if (consolidadoState) consolidadoState.textContent = '—'; }
 
-  // Actualizar stats bar
-  const years = new Set((rows || []).map(r => new Date(r.fecha || r.created_at || '').getFullYear()).filter(y => y && !isNaN(y)));
+  // Stats bar: solo registros del año en curso
+  const currentYear = new Date().getFullYear();
+  const yearRows = (rows || []).filter(r => {
+    const y = new Date(r.fecha || r.created_at || '').getFullYear();
+    return y === currentYear;
+  });
+  const yearCred = yearRows.reduce((acc, r) => acc + (Number(r.creditos) || 0), 0);
+  const yearCredRounded = Math.round(yearCred * 100) / 100;
+
   const statCred = document.getElementById('statCreditos');
   const statAct = document.getElementById('statActividades');
   const statAnios = document.getElementById('statAnios');
-  if (statCred) statCred.textContent = totalCredRounded;
-  if (statAct) statAct.textContent = (rows || []).length;
-  if (statAnios) statAnios.textContent = years.size || 0;
+  if (statCred) statCred.textContent = yearCredRounded;
+  if (statAct) statAct.textContent = yearRows.length;
+  if (statAnios) statAnios.textContent = currentYear;
 }
 
 function getYearsFromRows(rows) {
