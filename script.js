@@ -1826,23 +1826,15 @@ async function ensureCertSignData() {
     const cfg = cfgRow?.config || {};
     console.log('[certSign] cfg sealUrl:', cfg.sealUrl || 'vacío');
 
-    // Probar cpg_commissions sin filtro active (puede estar en otro schema o con valor distinto)
-    const commParams = 'select=signer_name,signer_title,commission_name,signature_url&order=display_order.asc&limit=5';
-    const commPublic   = await restFetch('cpg_commissions', commParams, 'public');
-    const commAula     = await restFetch('cpg_commissions', commParams, 'aulacaeduc');
-    console.log('[certSign] commPublic:', JSON.stringify(commPublic));
-    console.log('[certSign] commAula:', JSON.stringify(commAula));
-    // Usar el primero que tenga signer_name (de cualquier schema)
-    const allComms = [...(Array.isArray(commPublic) ? commPublic : [commPublic]), ...(Array.isArray(commAula) ? commAula : [commAula])].filter(Boolean);
-    let comm = allComms.find(r => r?.signer_name) || {};
-    console.log('[certSign] comm signer_name:', comm.signer_name || 'vacío');
+    // Los datos del firmante se guardan directamente en cpg_cert_config por Aula Virtual
+    console.log('[certSign] _signerName desde cfg:', cfg._signerName || 'vacío');
 
     __CERT_SIGN_DATA = {
       sealUrl: cfg.sealUrl || '',
-      signatureUrl: comm.signature_url || cfg.signatureUrl || '',
-      signerName: comm.signer_name || '',
-      signerTitle: comm.signer_title || '',
-      commissionName: comm.commission_name || '',
+      signatureUrl: cfg.signatureUrl || '',
+      signerName: cfg._signerName || '',
+      signerTitle: cfg._signerTitle || '',
+      commissionName: cfg._commissionName || '',
     };
     return __CERT_SIGN_DATA;
   } catch (e) { console.warn('ensureCertSignData error:', e); return null; }
