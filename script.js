@@ -1793,15 +1793,27 @@ let __CERT_SIGN_DATA = null;
 async function ensureCertSignData() {
   if (__CERT_SIGN_DATA) return __CERT_SIGN_DATA;
   try {
-    // cpg_cert_config y cpg_commissions están en el schema aulacaeduc
-    const sb = getAulaVirtualClient();
-    if (!sb) return null;
-    const [cfgRes, commRes] = await Promise.all([
-      sb.from('cpg_cert_config').select('config').eq('id', 1).maybeSingle(),
-      sb.from('cpg_commissions').select('signer_name,signer_title,commission_name,signature_url').eq('active', true).order('display_order', { ascending: true }).limit(1).maybeSingle(),
-    ]);
-    const cfg = cfgRes.data?.config || {};
-    const comm = commRes.data || {};
+    // Intentar en public schema primero, luego aulacaeduc, usar el que devuelva datos
+    const clients = [getSupabaseClient(), getAulaVirtualClient()].filter(Boolean);
+    let cfg = {}, comm = {};
+
+    for (const sb of clients) {
+      try {
+        if (!cfg.sealUrl) {
+          const { data, error } = await sb.from('cpg_cert_config').select('config').eq('id', 1).maybeSingle();
+          if (data?.config) { cfg = data.config; console.log('[certSign] cfg OK via', sb === clients[0] ? 'public' : 'aulacaeduc'); }
+          else if (error) console.warn('[certSign] cfg error:', error.message);
+        }
+        if (!comm.signer_name) {
+          const { data, error } = await sb.from('cpg_commissions').select('signer_name,signer_title,commission_name,signature_url').eq('active', true).order('display_order', { ascending: true }).limit(1).maybeSingle();
+          if (data?.signer_name) { comm = data; console.log('[certSign] comm OK:', data.signer_name); }
+          else if (error) console.warn('[certSign] comm error:', error.message);
+          else console.warn('[certSign] comm vacío en schema', sb === clients[0] ? 'public' : 'aulacaeduc');
+        }
+      } catch (e) { console.warn('[certSign] sb error:', e.message); }
+      if (cfg.sealUrl && comm.signer_name) break;
+    }
+
     __CERT_SIGN_DATA = {
       sealUrl: cfg.sealUrl || '',
       signatureUrl: comm.signature_url || cfg.signatureUrl || '',
@@ -1809,6 +1821,7 @@ async function ensureCertSignData() {
       signerTitle: comm.signer_title || '',
       commissionName: comm.commission_name || '',
     };
+    console.log('[certSign] final:', __CERT_SIGN_DATA);
     return __CERT_SIGN_DATA;
   } catch (e) { console.warn('ensureCertSignData error:', e); return null; }
 }
@@ -1878,22 +1891,21 @@ async function drawSignatureBlock(doc, signData) {
   }
 
   // ── Línea bajo la firma ──
-  const lineY = imgTopY + sigMaxH + 6;
+  const lineY = imgTopY + sigMaxH + 4;
   doc.setLineWidth(0.8); doc.setDrawColor(60, 60, 60);
   doc.line(sigCenterX - lineW / 2, lineY, sigCenterX + lineW / 2, lineY);
 
   // ── Texto del coordinador ──
-  let ty = lineY + 13;
   doc.setTextColor(20, 20, 20);
-  if (signData.signerName) {
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-    doc.text(signData.signerName, sigCenterX, ty, { align: 'center' });
-    ty += 13;
-  }
+  let ty = lineY + 14;
+  const name = signData.signerName || '—';
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  doc.text(name, sigCenterX, ty, { align: 'center' });
+  ty += 14;
   if (signData.signerTitle) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
     doc.text(signData.signerTitle, sigCenterX, ty, { align: 'center' });
-    ty += 12;
+    ty += 13;
   }
   if (signData.commissionName) {
     doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80, 80, 80);
