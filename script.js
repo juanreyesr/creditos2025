@@ -1793,9 +1793,9 @@ let __CERT_SIGN_DATA = null;
 async function ensureCertSignData() {
   if (__CERT_SIGN_DATA) return __CERT_SIGN_DATA;
   try {
-    const sb = getSupabaseClient();
+    // cpg_cert_config y cpg_commissions están en el schema aulacaeduc
+    const sb = getAulaVirtualClient();
     if (!sb) return null;
-    // Cargar config del certificado (sealUrl) y primera comisión activa con firma
     const [cfgRes, commRes] = await Promise.all([
       sb.from('cpg_cert_config').select('config').eq('id', 1).maybeSingle(),
       sb.from('cpg_commissions').select('signer_name,signer_title,commission_name,signature_url').eq('active', true).order('display_order', { ascending: true }).limit(1).maybeSingle(),
@@ -1810,7 +1810,7 @@ async function ensureCertSignData() {
       commissionName: comm.commission_name || '',
     };
     return __CERT_SIGN_DATA;
-  } catch { return null; }
+  } catch (e) { console.warn('ensureCertSignData error:', e); return null; }
 }
 
 async function urlToDataUrl(url) {
@@ -1837,11 +1837,9 @@ async function urlToDataUrl(url) {
 // Dibuja el bloque de firma en la parte inferior de la última página del PDF
 async function drawSignatureBlock(doc, signData) {
   if (!signData) return;
-  const { jsPDF } = window.jspdf;
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const pad = 40;
-  const bottomY = pageH - 30;  // línea base desde el fondo
 
   // ── Cargar imágenes en paralelo ──
   const [sigDataUrl, sealDataUrl] = await Promise.all([
@@ -1849,60 +1847,66 @@ async function drawSignatureBlock(doc, signData) {
     urlToDataUrl(signData.sealUrl),
   ]);
 
-  // ── Dimensiones ──
-  const sigMaxW = 130, sigMaxH = 65;
-  const sealSize = 72;
-  const lineW = 150;
+  // ── Bloque centrado horizontalmente con firma + sello juntos ──
+  // Firma centrada en la mitad izquierda; sello justo a la derecha
+  const sigMaxW = 130, sigMaxH = 60;
+  const sealSize = 68;
+  const lineW = 145;
+  const gap = 40; // espacio entre firma y sello
 
-  // ── Posición X: firma centrada en el tercio izquierdo; sello en el tercio derecho ──
-  const sigCenterX = pageW * 0.28;
-  const sealX = pageW - pad - sealSize;
+  // Calcular ancho total del grupo para centrarlo
+  const groupW = sigMaxW + gap + sealSize;
+  const groupX = (pageW - groupW) / 2;   // X izquierda del grupo
+  const sigCenterX = groupX + sigMaxW / 2;
+  const sealX = groupX + sigMaxW + gap;
 
   // Separador superior
-  const blockTopY = bottomY - 115;
+  const blockTopY = pageH - 140;
   doc.setLineWidth(0.3); doc.setDrawColor(180, 180, 180);
   doc.line(pad, blockTopY, pageW - pad, blockTopY);
 
+  const imgTopY = blockTopY + 12;
+
   // ── Firma (imagen) ──
   if (sigDataUrl) {
-    // Calcular dimensiones proporcionales
     const tmpImg = new Image();
     await new Promise(r => { tmpImg.onload = r; tmpImg.onerror = r; tmpImg.src = sigDataUrl; setTimeout(r, 3000); });
     const iw = tmpImg.naturalWidth || sigMaxW, ih = tmpImg.naturalHeight || sigMaxH;
     let dw = sigMaxW, dh = dw * (ih / iw);
     if (dh > sigMaxH) { dh = sigMaxH; dw = dh * (iw / ih); }
-    const sigX = sigCenterX - dw / 2;
-    const sigY = blockTopY + 10;
-    doc.addImage(sigDataUrl, 'PNG', sigX, sigY, dw, dh);
+    doc.addImage(sigDataUrl, 'PNG', sigCenterX - dw / 2, imgTopY, dw, dh);
   }
 
   // ── Línea bajo la firma ──
-  const lineY = blockTopY + 10 + sigMaxH + 6;
-  const lineX = sigCenterX - lineW / 2;
+  const lineY = imgTopY + sigMaxH + 6;
   doc.setLineWidth(0.8); doc.setDrawColor(60, 60, 60);
-  doc.line(lineX, lineY, lineX + lineW, lineY);
+  doc.line(sigCenterX - lineW / 2, lineY, sigCenterX + lineW / 2, lineY);
 
   // ── Texto del coordinador ──
   let ty = lineY + 13;
-  doc.setTextColor(20, 20, 20); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-  doc.text(signData.signerName || '', sigCenterX, ty, { align: 'center' });
+  doc.setTextColor(20, 20, 20);
+  if (signData.signerName) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text(signData.signerName, sigCenterX, ty, { align: 'center' });
+    ty += 13;
+  }
   if (signData.signerTitle) {
-    ty += 13; doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
     doc.text(signData.signerTitle, sigCenterX, ty, { align: 'center' });
+    ty += 12;
   }
   if (signData.commissionName) {
-    ty += 12; doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80, 80, 80);
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80, 80, 80);
     doc.text(signData.commissionName, sigCenterX, ty, { align: 'center' });
   }
 
-  // ── Sello ──
+  // ── Sello alineado verticalmente al centro del bloque de firma ──
   if (sealDataUrl) {
-    const sealY = blockTopY + 12;
-    doc.addImage(sealDataUrl, 'PNG', sealX, sealY, sealSize, sealSize);
+    const sealY = imgTopY + (sigMaxH - sealSize) / 2;
+    doc.addImage(sealDataUrl, 'PNG', sealX, sealY > imgTopY ? sealY : imgTopY, sealSize, sealSize);
   }
 
-  // Resetear color de texto
-  doc.setTextColor(0, 0, 0);
+  doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
 }
 
 /* =======================================================
