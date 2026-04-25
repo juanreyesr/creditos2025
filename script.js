@@ -1826,15 +1826,15 @@ async function ensureCertSignData() {
     const cfg = cfgRow?.config || {};
     console.log('[certSign] cfg sealUrl:', cfg.sealUrl || 'vacío');
 
-    // Los datos del firmante se guardan directamente en cpg_cert_config por Aula Virtual
-    console.log('[certSign] _signerName desde cfg:', cfg._signerName || 'vacío');
+    // coordinatorName y coordinatorTitle viven directamente en cpg_cert_config
+    console.log('[certSign] coordinatorName:', cfg.coordinatorName || 'vacío');
 
     __CERT_SIGN_DATA = {
       sealUrl: cfg.sealUrl || '',
       signatureUrl: cfg.signatureUrl || '',
-      signerName: cfg._signerName || '',
-      signerTitle: cfg._signerTitle || '',
-      commissionName: cfg._commissionName || '',
+      signerName: cfg.coordinatorName || cfg._signerName || '',
+      signerTitle: cfg.coordinatorTitle || cfg._signerTitle || '',
+      commissionName: cfg._commissionName || 'Comisión de Acreditación y Educación Continua',
     };
     return __CERT_SIGN_DATA;
   } catch (e) { console.warn('ensureCertSignData error:', e); return null; }
