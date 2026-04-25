@@ -2375,7 +2375,7 @@ function promptMissingProfileFields({ needNombre, needTelefono, currentNombre })
       if (needTelefono) {
         if (!telefono) { if (state) state.textContent = 'Ingresa tu número de celular.'; return; }
         if (typeof phoneValidGT === 'function' && !phoneValidGT(telefono)) {
-          if (state) state.textContent = 'Teléfono inválido (+502 ########).'; return;
+          if (state) state.textContent = 'Número inválido. Ingresa 8 dígitos.'; return;
         }
       }
       finish({ nombre, telefono });
