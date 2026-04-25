@@ -1786,6 +1786,126 @@ async function getPreviewDataUrlFromStorage(path) {
 }
 
 /* =======================================================
+   Datos de firma/sello del coordinador CAEDUC (cacheado)
+======================================================= */
+let __CERT_SIGN_DATA = null;
+
+async function ensureCertSignData() {
+  if (__CERT_SIGN_DATA) return __CERT_SIGN_DATA;
+  try {
+    const sb = getSupabaseClient();
+    if (!sb) return null;
+    // Cargar config del certificado (sealUrl) y primera comisión activa con firma
+    const [cfgRes, commRes] = await Promise.all([
+      sb.from('cpg_cert_config').select('config').eq('id', 1).maybeSingle(),
+      sb.from('cpg_commissions').select('signer_name,signer_title,commission_name,signature_url').eq('active', true).order('display_order', { ascending: true }).limit(1).maybeSingle(),
+    ]);
+    const cfg = cfgRes.data?.config || {};
+    const comm = commRes.data || {};
+    __CERT_SIGN_DATA = {
+      sealUrl: cfg.sealUrl || '',
+      signatureUrl: comm.signature_url || cfg.signatureUrl || '',
+      signerName: comm.signer_name || '',
+      signerTitle: comm.signer_title || '',
+      commissionName: comm.commission_name || '',
+    };
+    return __CERT_SIGN_DATA;
+  } catch { return null; }
+}
+
+async function urlToDataUrl(url) {
+  if (!url) return null;
+  try {
+    return await new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth || img.width; c.height = img.naturalHeight || img.height;
+          c.getContext('2d').drawImage(img, 0, 0);
+          resolve(c.toDataURL('image/png'));
+        } catch { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+      setTimeout(() => resolve(null), 8000);
+    });
+  } catch { return null; }
+}
+
+// Dibuja el bloque de firma en la parte inferior de la última página del PDF
+async function drawSignatureBlock(doc, signData) {
+  if (!signData) return;
+  const { jsPDF } = window.jspdf;
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const pad = 40;
+  const bottomY = pageH - 30;  // línea base desde el fondo
+
+  // ── Cargar imágenes en paralelo ──
+  const [sigDataUrl, sealDataUrl] = await Promise.all([
+    urlToDataUrl(signData.signatureUrl),
+    urlToDataUrl(signData.sealUrl),
+  ]);
+
+  // ── Dimensiones ──
+  const sigMaxW = 130, sigMaxH = 65;
+  const sealSize = 72;
+  const lineW = 150;
+
+  // ── Posición X: firma centrada en el tercio izquierdo; sello en el tercio derecho ──
+  const sigCenterX = pageW * 0.28;
+  const sealX = pageW - pad - sealSize;
+
+  // Separador superior
+  const blockTopY = bottomY - 115;
+  doc.setLineWidth(0.3); doc.setDrawColor(180, 180, 180);
+  doc.line(pad, blockTopY, pageW - pad, blockTopY);
+
+  // ── Firma (imagen) ──
+  if (sigDataUrl) {
+    // Calcular dimensiones proporcionales
+    const tmpImg = new Image();
+    await new Promise(r => { tmpImg.onload = r; tmpImg.onerror = r; tmpImg.src = sigDataUrl; setTimeout(r, 3000); });
+    const iw = tmpImg.naturalWidth || sigMaxW, ih = tmpImg.naturalHeight || sigMaxH;
+    let dw = sigMaxW, dh = dw * (ih / iw);
+    if (dh > sigMaxH) { dh = sigMaxH; dw = dh * (iw / ih); }
+    const sigX = sigCenterX - dw / 2;
+    const sigY = blockTopY + 10;
+    doc.addImage(sigDataUrl, 'PNG', sigX, sigY, dw, dh);
+  }
+
+  // ── Línea bajo la firma ──
+  const lineY = blockTopY + 10 + sigMaxH + 6;
+  const lineX = sigCenterX - lineW / 2;
+  doc.setLineWidth(0.8); doc.setDrawColor(60, 60, 60);
+  doc.line(lineX, lineY, lineX + lineW, lineY);
+
+  // ── Texto del coordinador ──
+  let ty = lineY + 13;
+  doc.setTextColor(20, 20, 20); doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+  doc.text(signData.signerName || '', sigCenterX, ty, { align: 'center' });
+  if (signData.signerTitle) {
+    ty += 13; doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(signData.signerTitle, sigCenterX, ty, { align: 'center' });
+  }
+  if (signData.commissionName) {
+    ty += 12; doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(80, 80, 80);
+    doc.text(signData.commissionName, sigCenterX, ty, { align: 'center' });
+  }
+
+  // ── Sello ──
+  if (sealDataUrl) {
+    const sealY = blockTopY + 12;
+    doc.addImage(sealDataUrl, 'PNG', sealX, sealY, sealSize, sealSize);
+  }
+
+  // Resetear color de texto
+  doc.setTextColor(0, 0, 0);
+}
+
+/* =======================================================
    PDF constancia
 ======================================================= */
 async function ensurePdfLogoDataUrl() {
@@ -1865,8 +1985,15 @@ async function generarConstanciaPDF(rec, localFileBlob) {
       doc.addImage(evidDataUrl, 'PNG', pad, topY, drawW, drawH);
     }
   } catch (e) { console.warn('No se pudo incrustar comprobante:', e); }
-  doc.setFontSize(10); doc.setTextColor(120);
-  if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, 820);
+  // ── Firma / sello del coordinador ──
+  try {
+    const signData = await ensureCertSignData();
+    await drawSignatureBlock(doc, signData);
+  } catch (e) { console.warn('No se pudo agregar bloque de firma:', e); }
+
+  doc.setFontSize(9); doc.setTextColor(150);
+  const pageH2 = doc.internal.pageSize.getHeight();
+  if (rec.hash) doc.text(`Hash: ${rec.hash}`, pad, pageH2 - 8);
   savePdfMobile(doc, `Constancia_${rec.correlativo}.pdf`);
 }
 
@@ -1928,7 +2055,15 @@ async function generarConsolidadoPDF(rows, yearFilter) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
   doc.text(`Total de créditos acumulados${titleSuffix}: ${totalCredRounded}`, pad, y);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120);
-  doc.text('Este documento se actualiza cada vez que se registra una nueva actividad.', pad, pageH - 48);
+  doc.text('Este documento se actualiza cada vez que se registra una nueva actividad.', pad, pageH - 148);
+  doc.setTextColor(0);
+
+  // ── Firma / sello del coordinador en última página ──
+  try {
+    const signData = await ensureCertSignData();
+    await drawSignatureBlock(doc, signData);
+  } catch (e) { console.warn('No se pudo agregar bloque de firma:', e); }
+
   const yearTag = yearFilter ? `_${yearFilter}` : '';
   const filename = `Registro_Unificado_Creditos${yearTag}_${String(colegiado).replace(/[^0-9A-Za-z_-]/g,'') || 'CPG'}_${new Date().toISOString().slice(0,10)}.pdf`;
   const blob = doc.output('blob');
