@@ -470,14 +470,25 @@ function updateAuthButton(isLoggedIn) {
 }
 
 aulaVirtualNavBtn?.addEventListener('click', async () => {
-  const sb = getSupabaseClient(); if (!sb) return;
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) { showToast('Inicia sesión primero.', 'warn'); return; }
+  const base = 'https://aulavirtualcpg.org/';
   const colegiado = __USER_PROFILE?.colegiado_numero || '';
   const nombre = __USER_PROFILE?.nombre || '';
-  const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
   const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
-  window.location.href = `https://aulavirtualcpg.org/${query}#${hash}`;
+  // El botón siempre debe navegar; si no hay sesión utilizable, vamos igual y el aula gestionará el login.
+  let session = null;
+  const sb = getSupabaseClient();
+  if (sb) {
+    try {
+      ({ data: { session } } = await sb.auth.getSession());
+      if (!session) {
+        try { await sb.auth.refreshSession(); } catch {}
+        ({ data: { session } } = await sb.auth.getSession());
+      }
+    } catch {}
+  }
+  if (!session) { window.location.href = `${base}${query}`; return; }
+  const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
+  window.location.href = `${base}${query}#${hash}`;
 });
 
 async function applyUIState() {
