@@ -2327,20 +2327,90 @@ document.getElementById('avCertsBody')?.addEventListener('click', async e => {
   await importAvCert(certCode);
 });
 
+// Modal mínimo para pedir SOLO los campos faltantes del perfil (primera importación)
+function promptMissingProfileFields({ needNombre, needTelefono, currentNombre }) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('quickProfileModal');
+    if (!modal) { resolve(null); return; }
+    const nombreWrap = document.getElementById('quickProfileNombreWrap');
+    const telWrap = document.getElementById('quickProfileTelefonoWrap');
+    const nombreEl = document.getElementById('quickProfileNombre');
+    const telEl = document.getElementById('quickProfileTelefono');
+    const saveBtn = document.getElementById('quickProfileSaveBtn');
+    const closeBtn = document.getElementById('closeQuickProfile');
+    const state = document.getElementById('quickProfileState');
+    if (state) state.textContent = '';
+    if (nombreWrap) nombreWrap.style.display = needNombre ? '' : 'none';
+    if (telWrap) telWrap.style.display = needTelefono ? '' : 'none';
+    if (nombreEl) nombreEl.value = currentNombre || '';
+    if (telEl) telEl.value = '';
+    openModal(modal);
+    setTimeout(() => { (needNombre ? nombreEl : telEl)?.focus(); }, 50);
+
+    let done = false;
+    const finish = (result) => {
+      if (done) return; done = true;
+      saveBtn.removeEventListener('click', onSave);
+      closeBtn.removeEventListener('click', onCancel);
+      modal.removeEventListener('click', onBackdrop);
+      document.removeEventListener('keydown', onKey);
+      closeModal(modal);
+      resolve(result);
+    };
+    const onSave = () => {
+      const nombre = (nombreEl?.value || '').trim();
+      const telefono = (telEl?.value || '').trim();
+      if (needNombre && !nombre) { if (state) state.textContent = 'Ingresa tu nombre completo.'; return; }
+      if (needTelefono) {
+        if (!telefono) { if (state) state.textContent = 'Ingresa tu número de celular.'; return; }
+        if (typeof phoneValidGT === 'function' && !phoneValidGT(telefono)) {
+          if (state) state.textContent = 'Teléfono inválido (+502 ########).'; return;
+        }
+      }
+      finish({ nombre, telefono });
+    };
+    const onCancel = () => finish(null);
+    const onBackdrop = (e) => { if (e.target === modal) finish(null); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') finish(null);
+      else if (e.key === 'Enter') onSave();
+    };
+    saveBtn.addEventListener('click', onSave);
+    closeBtn.addEventListener('click', onCancel);
+    modal.addEventListener('click', onBackdrop);
+    document.addEventListener('keydown', onKey);
+  });
+}
+
 async function importAvCert(certCode) {
   const cert = __AV_CERTS.find(c => c.certificate_code === certCode);
   if (!cert) return;
   const sb = getSupabaseClient(); if (!sb) return;
   const user = __CACHED_SESSION?.user; if (!user) return;
 
-  const nombre = __USER_PROFILE?.nombre || cert.recipient_name || '';
-  const telefono = __USER_PROFILE?.telefono || '';
+  let nombre = (__USER_PROFILE?.nombre || cert.recipient_name || '').trim();
+  let telefono = (__USER_PROFILE?.telefono || '').trim();
   const colegiadoActivo = (__USER_PROFILE?.colegiado_activo === true || __USER_PROFILE?.colegiado_activo === 'Sí') ? 'Sí' : 'No';
   const colegiadoNum = __USER_PROFILE?.colegiado_numero || '';
 
-  if (!nombre || !telefono || !colegiadoNum) {
-    showToast('Completa tu perfil antes de importar certificados.', 'warn');
+  if (!colegiadoNum) {
+    showToast('No se pudo identificar tu número de colegiado. Recarga la página.', 'error');
     renderAvCerts(); return;
+  }
+
+  // Pedir SOLO los campos que faltan (primera vez). Luego se guardan en el perfil.
+  const needNombre = !nombre;
+  const needTelefono = !telefono;
+  if (needNombre || needTelefono) {
+    const filled = await promptMissingProfileFields({ needNombre, needTelefono, currentNombre: nombre });
+    if (!filled) { renderAvCerts(); return; }
+    if (needNombre) nombre = filled.nombre;
+    if (needTelefono) telefono = filled.telefono;
+    const updates = {};
+    if (needNombre) updates.nombre = nombre;
+    if (needTelefono) updates.telefono = telefono;
+    const saveErr = await saveUserProfile(user.id, updates);
+    if (saveErr) { showToast('No se pudo guardar el perfil: ' + sbErrMsg(saveErr), 'error'); renderAvCerts(); return; }
   }
   const horas = Number(cert.video_duration) || 1;
   const creditos = calcCreditos(horas);

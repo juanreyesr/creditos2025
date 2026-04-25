@@ -413,6 +413,33 @@
   </div>
 
   <!-- MODAL DE AUTENTICACIÓN (usuarios) -->
+  <!-- Modal: solicitar datos faltantes al importar (solo se muestra si falta algo) -->
+  <div class="modal" id="quickProfileModal" aria-hidden="true" role="dialog" aria-labelledby="quickProfileTitle">
+    <div class="modal-content modal-auth-content" role="document">
+      <header class="modal-header">
+        <h3 id="quickProfileTitle">Un dato más para continuar</h3>
+        <button class="iconbtn" id="closeQuickProfile" type="button">✕</button>
+      </header>
+      <div style="padding:16px 20px">
+        <p class="muted" style="margin:0 0 14px;font-size:13px">Solo es necesario la primera vez. Lo guardaremos en tu perfil para futuras importaciones.</p>
+        <div id="quickProfileNombreWrap" style="display:none">
+          <label>Nombre completo
+            <input type="text" id="quickProfileNombre" maxlength="120" autocomplete="name" />
+          </label>
+        </div>
+        <div id="quickProfileTelefonoWrap" style="display:none">
+          <label>Celular (GT)
+            <input type="tel" id="quickProfileTelefono" placeholder="+502 55555555" inputmode="numeric" autocomplete="tel-national" />
+          </label>
+        </div>
+        <div class="actions" style="margin-top:14px;gap:8px">
+          <button class="btn primary" id="quickProfileSaveBtn" type="button" style="flex:1;padding:11px">Guardar y continuar</button>
+        </div>
+        <span class="muted" id="quickProfileState" style="display:block;margin-top:10px;font-size:12px">—</span>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="authModal" aria-hidden="true" role="dialog">
     <div class="modal-content modal-auth-content" role="document">
       <header class="modal-header">
