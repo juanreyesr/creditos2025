@@ -1793,26 +1793,44 @@ let __CERT_SIGN_DATA = null;
 async function ensureCertSignData() {
   if (__CERT_SIGN_DATA) return __CERT_SIGN_DATA;
   try {
-    // Intentar en public schema primero, luego aulacaeduc, usar el que devuelva datos
-    const clients = [getSupabaseClient(), getAulaVirtualClient()].filter(Boolean);
-    let cfg = {}, comm = {};
+    const sbUrl = window.SB_URL;
+    const sbKey = window.SB_KEY;
 
-    for (const sb of clients) {
-      try {
-        if (!cfg.sealUrl) {
-          const { data, error } = await sb.from('cpg_cert_config').select('config').eq('id', 1).maybeSingle();
-          if (data?.config) { cfg = data.config; console.log('[certSign] cfg OK via', sb === clients[0] ? 'public' : 'aulacaeduc'); }
-          else if (error) console.warn('[certSign] cfg error:', error.message);
+    // Obtener token de sesión activa (mejor que anon key para RLS)
+    let authToken = sbKey;
+    try {
+      const sb = getSupabaseClient();
+      const { data: s } = await sb.auth.getSession();
+      if (s?.session?.access_token) authToken = s.session.access_token;
+    } catch {}
+
+    // Helper: fetch REST directo con schema configurable
+    const restFetch = async (table, params, schema = 'public') => {
+      const url = `${sbUrl}/rest/v1/${table}?${params}`;
+      const res = await fetch(url, {
+        headers: {
+          'apikey': sbKey,
+          'Authorization': `Bearer ${authToken}`,
+          'Accept-Profile': schema,
+          'Accept': 'application/json',
         }
-        if (!comm.signer_name) {
-          const { data, error } = await sb.from('cpg_commissions').select('signer_name,signer_title,commission_name,signature_url').eq('active', true).order('display_order', { ascending: true }).limit(1).maybeSingle();
-          if (data?.signer_name) { comm = data; console.log('[certSign] comm OK:', data.signer_name); }
-          else if (error) console.warn('[certSign] comm error:', error.message);
-          else console.warn('[certSign] comm vacío en schema', sb === clients[0] ? 'public' : 'aulacaeduc');
-        }
-      } catch (e) { console.warn('[certSign] sb error:', e.message); }
-      if (cfg.sealUrl && comm.signer_name) break;
-    }
+      });
+      if (!res.ok) { console.warn(`[certSign] REST ${schema}.${table} → ${res.status}`); return null; }
+      const json = await res.json();
+      return Array.isArray(json) ? json[0] : json;
+    };
+
+    // Probar cpg_cert_config en public y aulacaeduc
+    let cfgRow = await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1') ||
+                 await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1', 'aulacaeduc');
+    const cfg = cfgRow?.config || {};
+    console.log('[certSign] cfg sealUrl:', cfg.sealUrl || 'vacío');
+
+    // Probar cpg_commissions en public y aulacaeduc
+    const commParams = 'select=signer_name,signer_title,commission_name,signature_url&active=eq.true&order=display_order.asc&limit=1';
+    let comm = await restFetch('cpg_commissions', commParams) ||
+               await restFetch('cpg_commissions', commParams, 'aulacaeduc') || {};
+    console.log('[certSign] comm signer_name:', comm.signer_name || 'vacío');
 
     __CERT_SIGN_DATA = {
       sealUrl: cfg.sealUrl || '',
@@ -1821,7 +1839,6 @@ async function ensureCertSignData() {
       signerTitle: comm.signer_title || '',
       commissionName: comm.commission_name || '',
     };
-    console.log('[certSign] final:', __CERT_SIGN_DATA);
     return __CERT_SIGN_DATA;
   } catch (e) { console.warn('ensureCertSignData error:', e); return null; }
 }
