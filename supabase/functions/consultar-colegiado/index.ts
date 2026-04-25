@@ -41,7 +41,9 @@ function parseHtml(html: string) {
     html.match(/<b>\s*(ACTIVO|INACTIVO|SUSPENDIDO|MOROSO)\s*<\/b>/i)?.[1]?.trim() ?? "";
 
   const field = (label: string) => {
-    const re = new RegExp(label + "[^<]*<\\/b>(?:&nbsp;|\\s)*([^<]+)", "i");
+    // Captura el contenido tras </b>, hasta cierre de </span>, </h4>, </h3> o <br>.
+    // Luego limpia etiquetas internas (p.ej. <i>2025</i>) y &nbsp;.
+    const re = new RegExp(label + "[^<]*<\\/b>([\\s\\S]*?)(?:<\\/span>|<\\/h[1-6]>|<br\\s*\\/?>)", "i");
     return clean(html.match(re)?.[1] ?? "");
   };
 
