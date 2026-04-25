@@ -1804,8 +1804,8 @@ async function ensureCertSignData() {
       if (s?.session?.access_token) authToken = s.session.access_token;
     } catch {}
 
-    // Helper: fetch REST directo con schema configurable
-    const restFetch = async (table, params, schema = 'public') => {
+    // Helper: fetch REST directo con schema configurable (devuelve array o objeto)
+    const restFetch = async (table, params, schema = 'public', single = false) => {
       const url = `${sbUrl}/rest/v1/${table}?${params}`;
       const res = await fetch(url, {
         headers: {
@@ -1817,19 +1817,24 @@ async function ensureCertSignData() {
       });
       if (!res.ok) { console.warn(`[certSign] REST ${schema}.${table} → ${res.status}`); return null; }
       const json = await res.json();
-      return Array.isArray(json) ? json[0] : json;
+      return single ? (Array.isArray(json) ? json[0] : json) : json;
     };
 
     // Probar cpg_cert_config en public y aulacaeduc
-    let cfgRow = await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1') ||
-                 await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1', 'aulacaeduc');
+    let cfgRow = await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1', 'public', true) ||
+                 await restFetch('cpg_cert_config', 'select=config&id=eq.1&limit=1', 'aulacaeduc', true);
     const cfg = cfgRow?.config || {};
     console.log('[certSign] cfg sealUrl:', cfg.sealUrl || 'vacío');
 
-    // Probar cpg_commissions en public y aulacaeduc
-    const commParams = 'select=signer_name,signer_title,commission_name,signature_url&active=eq.true&order=display_order.asc&limit=1';
-    let comm = await restFetch('cpg_commissions', commParams) ||
-               await restFetch('cpg_commissions', commParams, 'aulacaeduc') || {};
+    // Probar cpg_commissions sin filtro active (puede estar en otro schema o con valor distinto)
+    const commParams = 'select=signer_name,signer_title,commission_name,signature_url&order=display_order.asc&limit=5';
+    const commPublic   = await restFetch('cpg_commissions', commParams, 'public');
+    const commAula     = await restFetch('cpg_commissions', commParams, 'aulacaeduc');
+    console.log('[certSign] commPublic:', JSON.stringify(commPublic));
+    console.log('[certSign] commAula:', JSON.stringify(commAula));
+    // Usar el primero que tenga signer_name (de cualquier schema)
+    const allComms = [...(Array.isArray(commPublic) ? commPublic : [commPublic]), ...(Array.isArray(commAula) ? commAula : [commAula])].filter(Boolean);
+    let comm = allComms.find(r => r?.signer_name) || {};
     console.log('[certSign] comm signer_name:', comm.signer_name || 'vacío');
 
     __CERT_SIGN_DATA = {
