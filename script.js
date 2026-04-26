@@ -538,6 +538,8 @@ async function applyUIState() {
   } else {
     showProfileSetupUI();
   }
+  // Detección de admin compartido con aula virtual (no bloquea)
+  detectAdminFromAula();
 }
 
 /* =======================================================
@@ -545,6 +547,36 @@ async function applyUIState() {
 ======================================================= */
 let isSuperAdmin = false;
 let __ADMIN_ACTIVE = false;
+// Email del usuario en cpg_admin_users del aula (rol: 'admin' | 'super_admin' | null si no es admin)
+let __ADMIN_ROLE_FROM_AULA = null;
+
+// Detecta si el usuario actualmente autenticado es admin según cpg_admin_users del aula.
+// Cualquier admin del aula es admin de créditos también.
+async function detectAdminFromAula() {
+  __ADMIN_ROLE_FROM_AULA = null;
+  try {
+    const sb = getSupabaseClient(); if (!sb) return;
+    const { data: { session } } = await sb.auth.getSession();
+    const email = session?.user?.email?.toLowerCase().trim();
+    if (!email) return;
+    const avSb = getAulaVirtualClient(); if (!avSb) return;
+    const { data: rec } = await avSb
+      .from('cpg_admin_users')
+      .select('role')
+      .ilike('email', email)
+      .maybeSingle();
+    if (rec?.role) __ADMIN_ROLE_FROM_AULA = rec.role; // 'admin' | 'super_admin'
+  } catch (e) { console.warn('[detectAdminFromAula]', e); }
+  updateEnterAdminBtn();
+}
+
+function updateEnterAdminBtn() {
+  const btn = document.getElementById('enterAdminBtn');
+  if (!btn) return;
+  const adminVisible = adminSection && adminSection.style.display !== 'none';
+  // Solo mostrar si: es admin verificado del aula, NO está ya activo en admin, y NO está viendo el panel
+  btn.style.display = (__ADMIN_ROLE_FROM_AULA && !__ADMIN_ACTIVE && !adminVisible) ? '' : 'none';
+}
 
 function updateResumeAdminBtn() {
   const btn = document.getElementById('resumeAdminBtn');
@@ -552,6 +584,7 @@ function updateResumeAdminBtn() {
   // Solo mostrar mientras la sesión admin esté activa Y el panel admin no esté visible
   const adminVisible = adminSection && adminSection.style.display !== 'none';
   btn.style.display = (__ADMIN_ACTIVE && !adminVisible) ? '' : 'none';
+  updateEnterAdminBtn();
 }
 
 function openAdminSection() {
@@ -635,6 +668,19 @@ document.getElementById('resumeAdminBtn')?.addEventListener('click', () => {
   openAdminSection();
   showAdminTab('registros');
   updateResumeAdminBtn();
+});
+
+// Botón "Admin" — entrada directa para usuarios verificados en cpg_admin_users (sin PIN)
+document.getElementById('enterAdminBtn')?.addEventListener('click', () => {
+  if (!__ADMIN_ROLE_FROM_AULA) { openAdmin(); return; }
+  // super_admin del aula = superadmin en créditos. admin del aula = admin local.
+  isSuperAdmin = (__ADMIN_ROLE_FROM_AULA === 'super_admin');
+  __ADMIN_ACTIVE = true;
+  updateAdminBadge();
+  openAdminSection();
+  showAdminTab('registros');
+  updateResumeAdminBtn();
+  showToast(`Sesión administrativa iniciada (${isSuperAdmin ? 'superadmin' : 'admin'}).`, 'info');
 });
 
 // Open admin → show auth modal
@@ -1046,7 +1092,9 @@ authBtn?.addEventListener('click', async () => {
     __USER_PROFILE = null;
     __ADMIN_ACTIVE = false;
     isSuperAdmin = false;
+    __ADMIN_ROLE_FROM_AULA = null;
     updateResumeAdminBtn();
+    updateEnterAdminBtn();
     limpiarDatosRapidos(userId);
     try { form?.reset(); } catch {}
     if (preview) preview.innerHTML = '';
