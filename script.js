@@ -516,11 +516,21 @@ async function applyUIState() {
       const ssoColegiado = urlParams.get('sso_colegiado');
       const ssoNombre = decodeURIComponent(urlParams.get('sso_nombre') || '');
       if (ssoColegiado) {
-        await saveUserProfile(currentUser.id, {
-          colegiado_numero: ssoColegiado,
-          nombre: ssoNombre || '',
-          colegiado_activo: true,
-        });
+        // Salvaguarda: si ya existe OTRO usuario auth dueño del colegiado, NO reclamarlo
+        // para esta cuenta (típico cuando un admin navega entre apps llevando el sso_colegiado
+        // del usuario regular). Evita duplicar/dividir cuentas por colegiado.
+        const { data: ownerRow } = await sb.from('perfiles')
+          .select('user_id').eq('colegiado_numero', ssoColegiado).maybeSingle();
+        const ownerExists = !!ownerRow && ownerRow.user_id !== currentUser.id;
+        if (!ownerExists) {
+          await saveUserProfile(currentUser.id, {
+            colegiado_numero: ssoColegiado,
+            nombre: ssoNombre || '',
+            colegiado_activo: true,
+          });
+        } else {
+          console.warn('[SSO créditos] Colegiado', ssoColegiado, 'ya pertenece a otro usuario; no se reclama.');
+        }
         window.history.replaceState(null, '', window.location.pathname);
         await loadUserProfile(currentUser.id);
       } else {
