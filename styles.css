@@ -242,6 +242,28 @@ textarea{resize:vertical}
   box-shadow:0 8px 24px rgba(0,0,0,.18);
 }
 
+/* Modo admin: panel ocupa toda la ventana, scroll interno aislado del resto */
+body.admin-mode{ overflow:hidden; }
+body.admin-mode > .topbar,
+body.admin-mode > .container > section:not(#adminSection),
+body.admin-mode > .container > .stats-bar,
+body.admin-mode > footer,
+body.admin-mode > .foot{ display:none !important; }
+body.admin-mode #adminSection{
+  position:fixed;
+  inset:0;
+  z-index:1000;
+  background:var(--card);
+  border:none;
+  border-radius:0;
+  display:flex !important;
+  flex-direction:column;
+  overflow:hidden;
+}
+body.admin-mode #adminSection .admin-section-topbar{ flex-shrink:0; }
+body.admin-mode #adminSection .admin-tabs{ flex-shrink:0; }
+body.admin-mode #adminSection .admin-tab-panel{ flex:1; overflow:auto; padding:14px 18px; }
+
 .admin-section-topbar{
   display:flex;
   align-items:center;

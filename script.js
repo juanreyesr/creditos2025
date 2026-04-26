@@ -597,6 +597,10 @@ function openAdminSection() {
   if (setup) setup.style.display = 'none';
   const bar = document.getElementById('statsBar');
   if (bar) bar.style.display = 'none';
+  // Modo pantalla completa: el panel admin ocupa toda la ventana, scroll interno aislado
+  document.body.classList.add('admin-mode');
+  // Inicializar filtro de año (default: año actual) si no se ha cargado
+  populateAdminYearFilter();
   // Load config fields
   const cfgVideo = document.getElementById('cfgVideoUrl');
   if (cfgVideo && __APP_CONFIG.video_guia_url) cfgVideo.value = __APP_CONFIG.video_guia_url;
@@ -606,8 +610,16 @@ function openAdminSection() {
 
 function closeAdminSection() {
   if (adminSection) adminSection.style.display = 'none';
-  // Restore appropriate main UI
-  if (__ENTRY_ACCEPTED) applyUIState();
+  document.body.classList.remove('admin-mode');
+  // Restaurar UI principal de inmediato si ya tenemos perfil cargado
+  // (evita pantalla en blanco mientras applyUIState reabre la sesión).
+  if (__USER_PROFILE?.colegiado_numero) {
+    showMainDashboardUI();
+    applyProfileToUI(__USER_PROFILE);
+    loadAndRender().catch(() => {});
+  } else if (__ENTRY_ACCEPTED) {
+    applyUIState();
+  }
   updateResumeAdminBtn();
 }
 
@@ -617,7 +629,14 @@ function exitAdminMode() {
   isSuperAdmin = false;
   updateAdminBadge();
   if (adminSection) adminSection.style.display = 'none';
-  if (__ENTRY_ACCEPTED) applyUIState();
+  document.body.classList.remove('admin-mode');
+  if (__USER_PROFILE?.colegiado_numero) {
+    showMainDashboardUI();
+    applyProfileToUI(__USER_PROFILE);
+    loadAndRender().catch(() => {});
+  } else if (__ENTRY_ACCEPTED) {
+    applyUIState();
+  }
   updateResumeAdminBtn();
   showToast('Sesión administrativa cerrada.', 'info');
 }
@@ -1670,10 +1689,47 @@ form?.addEventListener('submit', async e => {
 /* =======================================================
    Panel Admin: render registros
 ======================================================= */
+// Construye la lista de años disponibles en el selector del panel admin.
+// Default: año actual.
+async function populateAdminYearFilter() {
+  const sel = document.getElementById('adminYearFilter');
+  if (!sel || sel.dataset.populated === '1') return;
+  const sb = getSupabaseClient(); if (!sb) return;
+  const currentYear = new Date().getFullYear();
+  const years = new Set([currentYear]);
+  try {
+    const { data } = await sb.from('registros').select('fecha').limit(2000);
+    (data || []).forEach(r => {
+      const y = (r.fecha || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) years.add(Number(y));
+    });
+  } catch {}
+  const sorted = Array.from(years).sort((a, b) => b - a);
+  sel.innerHTML = '<option value="all">Todos los años</option>' +
+    sorted.map(y => `<option value="${y}"${y === currentYear ? ' selected' : ''}>${y}</option>`).join('');
+  sel.dataset.populated = '1';
+}
+
+function getAdminDateBounds() {
+  const yearSel = document.getElementById('adminYearFilter');
+  const fromEl = document.getElementById('adminDateFrom');
+  const toEl = document.getElementById('adminDateTo');
+  const from = (fromEl?.value || '').trim();
+  const to = (toEl?.value || '').trim();
+  // Si hay rango explícito, ignora el año
+  if (from || to) return { from: from || null, to: to || null };
+  const y = yearSel?.value || 'all';
+  if (y === 'all' || !/^\d{4}$/.test(y)) return { from: null, to: null };
+  return { from: `${y}-01-01`, to: `${y}-12-31` };
+}
+
 async function renderAdmin() {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
   let q = sb.from('registros').select('*').order('created_at', { ascending: false });
   if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  const { from, to } = getAdminDateBounds();
+  if (from) q = q.gte('fecha', from);
+  if (to) q = q.lte('fecha', to);
   if (__HAS_DELETED_AT) { if (!showDeleted?.checked) q = q.is('deleted_at', null); }
   else { if (showDeleted) showDeleted.disabled = true; }
   const { data: rows, error } = await q;
@@ -1699,12 +1755,37 @@ async function renderAdmin() {
     adminTbody.appendChild(tr);
   }
   if (diagBox) diagBox.textContent = `Diagnóstico: deleted_at=${__HAS_DELETED_AT ? 'sí' : 'no'}. Registros cargados: ${rows?.length || 0}.`;
+  const countInfo = document.getElementById('adminCountInfo');
+  if (countInfo) {
+    const { from, to } = getAdminDateBounds();
+    const periodo = from || to ? ` · ${from || '…'} a ${to || '…'}` : '';
+    countInfo.textContent = `Mostrando ${rows?.length || 0} registro(s)${periodo}`;
+  }
 }
 
 adminSearchBtn?.addEventListener('click', async () => { currentAdminFilter = (adminSearch?.value || '').trim() || null; await renderAdmin(); });
 adminClearSearch?.addEventListener('click', async () => { currentAdminFilter = null; if (adminSearch) adminSearch.value = ''; await renderAdmin(); });
 adminSearch?.addEventListener('keydown', async e => { if (e.key === 'Enter') { e.preventDefault(); adminSearchBtn?.click(); } });
 showDeleted?.addEventListener('change', () => renderAdmin());
+
+// Filtros de año y rango de fechas en el panel admin
+document.getElementById('adminYearFilter')?.addEventListener('change', () => {
+  // Año excluye rango personalizado
+  const fromEl = document.getElementById('adminDateFrom');
+  const toEl = document.getElementById('adminDateTo');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  renderAdmin();
+});
+document.getElementById('adminDateFrom')?.addEventListener('change', () => renderAdmin());
+document.getElementById('adminDateTo')?.addEventListener('change', () => renderAdmin());
+document.getElementById('adminClearDates')?.addEventListener('click', () => {
+  const fromEl = document.getElementById('adminDateFrom');
+  const toEl = document.getElementById('adminDateTo');
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  renderAdmin();
+});
 
 document.getElementById('adminTable')?.addEventListener('click', async e => {
   const btn = e.target.closest('button[data-action]');
@@ -1735,6 +1816,9 @@ exportCSVBtn?.addEventListener('click', async () => {
   let q = sb.from('registros').select('*').order('created_at', { ascending: false });
   if (__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
   if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  const { from: dF, to: dT } = getAdminDateBounds();
+  if (dF) q = q.gte('fecha', dF);
+  if (dT) q = q.lte('fecha', dT);
   const { data: rows, error } = await q;
   if (error) { showToast('Error al exportar (RLS): ' + sbErrMsg(error), 'error'); return; }
   if (!rows?.length) return showToast('Sin registros', 'warn');
@@ -1752,6 +1836,9 @@ exportXLSXBtn?.addEventListener('click', async () => {
   let q = sb.from('registros').select('*').order('created_at', { ascending: false });
   if (__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
   if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  const { from: dF, to: dT } = getAdminDateBounds();
+  if (dF) q = q.gte('fecha', dF);
+  if (dT) q = q.lte('fecha', dT);
   const { data: rows, error } = await q;
   if (error) { showToast('Error al exportar (RLS): ' + sbErrMsg(error), 'error'); return; }
   if (!rows?.length) return showToast('Sin registros', 'warn');
