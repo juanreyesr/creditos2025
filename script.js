@@ -544,6 +544,15 @@ async function applyUIState() {
    Admin section (sub-menú)
 ======================================================= */
 let isSuperAdmin = false;
+let __ADMIN_ACTIVE = false;
+
+function updateResumeAdminBtn() {
+  const btn = document.getElementById('resumeAdminBtn');
+  if (!btn) return;
+  // Solo mostrar mientras la sesión admin esté activa Y el panel admin no esté visible
+  const adminVisible = adminSection && adminSection.style.display !== 'none';
+  btn.style.display = (__ADMIN_ACTIVE && !adminVisible) ? '' : 'none';
+}
 
 function openAdminSection() {
   if (formSection) formSection.style.display = 'none';
@@ -566,6 +575,18 @@ function closeAdminSection() {
   if (adminSection) adminSection.style.display = 'none';
   // Restore appropriate main UI
   if (__ENTRY_ACCEPTED) applyUIState();
+  updateResumeAdminBtn();
+}
+
+// Termina la sesión administrativa SIN cerrar la sesión de usuario
+function exitAdminMode() {
+  __ADMIN_ACTIVE = false;
+  isSuperAdmin = false;
+  updateAdminBadge();
+  if (adminSection) adminSection.style.display = 'none';
+  if (__ENTRY_ACCEPTED) applyUIState();
+  updateResumeAdminBtn();
+  showToast('Sesión administrativa cerrada.', 'info');
 }
 
 function updateAdminBadge() {
@@ -598,9 +619,22 @@ function showAdminTab(tabId) {
   if (tabId === 'registros') renderAdmin();
 }
 
-// Volver al inicio
+// "Volver al inicio" — solo navega, no termina la sesión admin
 document.getElementById('backToMainBtn')?.addEventListener('click', () => {
   closeAdminSection();
+});
+
+// "Cerrar sesión administrativa" — termina la sesión admin (no la de usuario)
+document.getElementById('exitAdminBtn')?.addEventListener('click', () => {
+  exitAdminMode();
+});
+
+// Botón persistente "Panel admin" para regresar sin re-autenticar
+document.getElementById('resumeAdminBtn')?.addEventListener('click', () => {
+  if (!__ADMIN_ACTIVE) { openAdmin(); return; }
+  openAdminSection();
+  showAdminTab('registros');
+  updateResumeAdminBtn();
 });
 
 // Open admin → show auth modal
@@ -624,10 +658,12 @@ adminLogin?.addEventListener('click', async ev => {
   ev.preventDefault();
   if ((adminPass?.value || '').trim() !== ADMIN_PASSWORD) { showToast('Contraseña incorrecta', 'error'); return; }
   isSuperAdmin = false;
+  __ADMIN_ACTIVE = true;
   updateAdminBadge();
   closeModal(adminModal);
   openAdminSection();
   showAdminTab('registros');
+  updateResumeAdminBtn();
   showToast('Sesión admin local iniciada');
 });
 
@@ -646,11 +682,13 @@ superLogin?.addEventListener('click', async () => {
     if (pErr) { if (adminState) adminState.textContent = 'Error leyendo perfil: ' + sbErrMsg(pErr); return; }
     if (!perfil?.is_admin) { if (adminState) adminState.textContent = 'No tienes permisos de superadmin'; return; }
     isSuperAdmin = true;
+    __ADMIN_ACTIVE = true;
     updateAdminBadge();
     currentAdminFilter = null;
     closeModal(adminModal);
     openAdminSection();
     showAdminTab('registros');
+    updateResumeAdminBtn();
     if (adminState) adminState.textContent = 'OK (superadmin)';
     showToast('Sesión superadmin iniciada');
     updateAuthButton(true);
@@ -1006,6 +1044,9 @@ authBtn?.addEventListener('click', async () => {
     const { error } = await sb.auth.signOut();
     if (error) { showToast('No se pudo cerrar sesión: ' + sbErrMsg(error), 'error'); return; }
     __USER_PROFILE = null;
+    __ADMIN_ACTIVE = false;
+    isSuperAdmin = false;
+    updateResumeAdminBtn();
     limpiarDatosRapidos(userId);
     try { form?.reset(); } catch {}
     if (preview) preview.innerHTML = '';
