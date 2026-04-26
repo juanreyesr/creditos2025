@@ -474,21 +474,27 @@ aulaVirtualNavBtn?.addEventListener('click', async () => {
   const colegiado = __USER_PROFILE?.colegiado_numero || '';
   const nombre = __USER_PROFILE?.nombre || '';
   const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
-  // El botón siempre debe navegar; si no hay sesión utilizable, vamos igual y el aula gestionará el login.
-  let session = null;
-  const sb = getSupabaseClient();
-  if (sb) {
-    try {
-      ({ data: { session } } = await sb.auth.getSession());
-      if (!session) {
-        try { await sb.auth.refreshSession(); } catch {}
+  // Garantía de navegación: pase lo que pase, salimos a la otra app.
+  // Si conseguimos un access_token, lo enviamos por el hash para SSO.
+  try {
+    let session = null;
+    const sb = getSupabaseClient();
+    if (sb) {
+      try {
         ({ data: { session } } = await sb.auth.getSession());
-      }
-    } catch {}
-  }
-  if (!session) { window.location.href = `${base}${query}`; return; }
-  const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
-  window.location.href = `${base}${query}#${hash}`;
+        if (!session) {
+          try { await sb.auth.refreshSession(); } catch {}
+          ({ data: { session } } = await sb.auth.getSession());
+        }
+      } catch {}
+    }
+    if (session) {
+      const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
+      window.location.href = `${base}${query}#${hash}`;
+      return;
+    }
+  } catch (e) { console.warn('[aula-nav]', e); }
+  window.location.href = `${base}${query}`;
 });
 
 async function applyUIState() {
@@ -1259,7 +1265,13 @@ async function loadAndRender() {
   }
   if (__USER_PROFILE) { try { applyProfileToUI(__USER_PROFILE); } catch {} }
   else { try { precargarDesdeLocalStorage(userId); } catch {}; try { await precargarDatosDesdeUltimoRegistro(userId); } catch {} }
-  let q = sb.from('registros').select('*').eq('usuario_id', userId).order('created_at', { ascending: false });
+  // Filtramos por colegiado_numero cuando el perfil ya lo tiene, para incluir
+  // registros creados bajo otras cuentas auth del mismo colegiado (RLS lo permite).
+  // Si aún no hay perfil/colegiado vinculado, caemos al filtro por usuario_id.
+  const colegiadoFiltro = __USER_PROFILE?.colegiado_numero || '';
+  let q = sb.from('registros').select('*');
+  q = colegiadoFiltro ? q.eq('colegiado_numero', colegiadoFiltro) : q.eq('usuario_id', userId);
+  q = q.order('created_at', { ascending: false });
   if (__HAS_DELETED_AT) q = q.is('deleted_at', null);
   const { data, error } = await q;
   if (error) { console.error('loadAndRender error:', error); showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error'); return; }
@@ -2295,7 +2307,10 @@ async function loadAulaVirtualCerts() {
   const codes = (certs || []).map(c => c.certificate_code).filter(Boolean);
   let importedHashes = new Set();
   if (codes.length) {
-    const { data: imp } = await sb.from('registros').select('hash').eq('usuario_id', user.id).in('hash', codes);
+    // Detección de imports previos: por colegiado_numero (cubre cuentas auth duplicadas)
+    let impQ = sb.from('registros').select('hash').in('hash', codes);
+    impQ = colegiadoNum ? impQ.eq('colegiado_numero', colegiadoNum) : impQ.eq('usuario_id', user.id);
+    const { data: imp } = await impQ;
     (imp || []).forEach(r => { if (r.hash) importedHashes.add(r.hash); });
   }
   __AV_CERTS = certs || [];
