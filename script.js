@@ -1591,7 +1591,7 @@ form?.addEventListener('submit', async e => {
     }
     if (!phoneValidGT(telefono)) { showToast('Teléfono inválido (+502 ########)', 'error'); return; }
     if (!withinFiveYears(fecha)) { showToast('Fecha inválida (no futura, ≤ 5 años)', 'error'); return; }
-    if (!(horas >= 0.5 && horas <= 200)) { showToast('Horas fuera de rango (0.5 a 200).', 'error'); return; }
+    if (!(horas >= 0.5 && horas <= 500)) { showToast('Horas fuera de rango (0.5 a 500).', 'error'); return; }
     if (observaciones.length > 250) { showToast('Observaciones exceden 250 caracteres.', 'error'); return; }
     if (!fileRef) { showToast('Adjunte el comprobante (PDF/JPG/PNG) antes de registrar.', 'error'); markUploaderError(true); try { upZone?.scrollIntoView({ behavior:'smooth', block:'center' }); } catch {} upZone?.focus?.(); return; }
     if (!ALLOWED_MIME.includes(fileRef.type)) { showToast('Archivo no permitido.', 'error'); markUploaderError(true); return; }
