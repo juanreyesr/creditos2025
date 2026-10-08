@@ -609,13 +609,12 @@ function openAdminSection() {
   if (bar) bar.style.display = 'none';
   // Modo pantalla completa: el panel admin ocupa toda la ventana, scroll interno aislado
   document.body.classList.add('admin-mode');
-  // Inicializar filtro de año (default: año actual) si no se ha cargado
-  populateAdminYearFilter();
+  // Inicializar filtros de año (default: año actual) y mes actual en gestión
+  ensureYearFilters();
   // Load config fields
   const cfgVideo = document.getElementById('cfgVideoUrl');
   if (cfgVideo && __APP_CONFIG.video_guia_url) cfgVideo.value = __APP_CONFIG.video_guia_url;
   updateReglamentoStatus();
-  renderAdmin();
 }
 
 function closeAdminSection() {
@@ -677,8 +676,9 @@ function showAdminTab(tabId) {
   document.querySelectorAll('.admin-tab-panel').forEach(p => {
     p.style.display = p.id === `adminTab-${tabId}` ? '' : 'none';
   });
-  // Load registros only when that tab is shown
+  // Cargar datos solo cuando la pestaña se muestra
   if (tabId === 'registros') renderAdmin();
+  if (tabId === 'reporte') renderReport();
 }
 
 // "Volver al inicio" — solo navega, no termina la sesión admin
@@ -695,7 +695,7 @@ document.getElementById('exitAdminBtn')?.addEventListener('click', () => {
 document.getElementById('resumeAdminBtn')?.addEventListener('click', () => {
   if (!__ADMIN_ACTIVE) { openAdmin(); return; }
   openAdminSection();
-  showAdminTab('registros');
+  showAdminTab('reporte');
   updateResumeAdminBtn();
 });
 
@@ -707,7 +707,7 @@ document.getElementById('enterAdminBtn')?.addEventListener('click', () => {
   __ADMIN_ACTIVE = true;
   updateAdminBadge();
   openAdminSection();
-  showAdminTab('registros');
+  showAdminTab('reporte');
   updateResumeAdminBtn();
   showToast(`Sesión administrativa iniciada (${isSuperAdmin ? 'superadmin' : 'admin'}).`, 'info');
 });
@@ -737,7 +737,7 @@ adminLogin?.addEventListener('click', async ev => {
   updateAdminBadge();
   closeModal(adminModal);
   openAdminSection();
-  showAdminTab('registros');
+  showAdminTab('reporte');
   updateResumeAdminBtn();
   showToast('Sesión admin local iniciada');
 });
@@ -762,7 +762,7 @@ superLogin?.addEventListener('click', async () => {
     currentAdminFilter = null;
     closeModal(adminModal);
     openAdminSection();
-    showAdminTab('registros');
+    showAdminTab('reporte');
     updateResumeAdminBtn();
     if (adminState) adminState.textContent = 'OK (superadmin)';
     showToast('Sesión superadmin iniciada');
@@ -1699,25 +1699,85 @@ form?.addEventListener('submit', async e => {
 /* =======================================================
    Panel Admin: render registros
 ======================================================= */
+// Supabase/PostgREST devuelve como máximo 1000 filas por consulta (max-rows).
+// Pide páginas consecutivas con .range() hasta traer todas las filas.
+// buildQuery debe devolver una consulta nueva y con orden estable en cada llamada.
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+  const all = [];
+  for (let start = 0; ; start += pageSize) {
+    const { data, error } = await buildQuery().range(start, start + pageSize - 1);
+    if (error) return { data: null, error };
+    all.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: all, error: null };
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function localDateStr(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function currentMonthBounds() {
+  const now = new Date();
+  return {
+    from: localDateStr(new Date(now.getFullYear(), now.getMonth(), 1)),
+    to: localDateStr(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+}
+
+// Consulta de registros con los filtros activos de la pestaña "Gestión de registros"
+function buildAdminRegistrosQuery() {
+  const sb = getSupabaseClient();
+  let q = sb.from('registros').select('*')
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true });
+  if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
+  const { from, to } = getAdminDateBounds();
+  if (from) q = q.gte('fecha', from);
+  if (to) q = q.lte('fecha', to);
+  if (__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
+  return q;
+}
+
+let __YEARS_PROMISE = null;
+function ensureYearFilters() {
+  if (!__YEARS_PROMISE) __YEARS_PROMISE = populateAdminYearFilter();
+  return __YEARS_PROMISE;
+}
+
 // Construye la lista de años disponibles en el selector del panel admin.
 // Default: año actual.
 async function populateAdminYearFilter() {
   const sel = document.getElementById('adminYearFilter');
   if (!sel || sel.dataset.populated === '1') return;
+  sel.dataset.populated = '1';
+  // Por defecto la gestión muestra solo el mes en curso para que la tabla no sea enorme
+  const { from, to } = currentMonthBounds();
+  const fromEl = document.getElementById('adminDateFrom');
+  const toEl = document.getElementById('adminDateTo');
+  if (fromEl && !fromEl.value) fromEl.value = from;
+  if (toEl && !toEl.value) toEl.value = to;
   const sb = getSupabaseClient(); if (!sb) return;
   const currentYear = new Date().getFullYear();
   const years = new Set([currentYear]);
   try {
-    const { data } = await sb.from('registros').select('fecha').limit(2000);
+    const { data } = await fetchAllRows(() => sb.from('registros').select('id,fecha,created_at').order('id', { ascending: true }));
     (data || []).forEach(r => {
-      const y = (r.fecha || '').slice(0, 4);
-      if (/^\d{4}$/.test(y)) years.add(Number(y));
+      [r.fecha, r.created_at].forEach(v => {
+        const y = String(v || '').slice(0, 4);
+        if (/^\d{4}$/.test(y)) years.add(Number(y));
+      });
     });
   } catch {}
   const sorted = Array.from(years).sort((a, b) => b - a);
-  sel.innerHTML = '<option value="all">Todos los años</option>' +
+  const opts = '<option value="all">Todos los años</option>' +
     sorted.map(y => `<option value="${y}"${y === currentYear ? ' selected' : ''}>${y}</option>`).join('');
-  sel.dataset.populated = '1';
+  sel.innerHTML = opts;
+  const repSel = document.getElementById('repYear');
+  if (repSel && repSel.dataset.populated !== '1') {
+    const prev = repSel.value;
+    repSel.innerHTML = opts;
+    if (prev) repSel.value = prev;
+    repSel.dataset.populated = '1';
+  }
 }
 
 function getAdminDateBounds() {
@@ -1735,14 +1795,11 @@ function getAdminDateBounds() {
 
 async function renderAdmin() {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
-  let q = sb.from('registros').select('*').order('created_at', { ascending: false });
-  if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
-  const { from, to } = getAdminDateBounds();
-  if (from) q = q.gte('fecha', from);
-  if (to) q = q.lte('fecha', to);
-  if (__HAS_DELETED_AT) { if (!showDeleted?.checked) q = q.is('deleted_at', null); }
-  else { if (showDeleted) showDeleted.disabled = true; }
-  const { data: rows, error } = await q;
+  await ensureYearFilters();
+  if (!__HAS_DELETED_AT && showDeleted) showDeleted.disabled = true;
+  const countInfo = document.getElementById('adminCountInfo');
+  if (countInfo) countInfo.textContent = 'Cargando registros…';
+  const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
   if (error) { exportStatus && (exportStatus.textContent = 'Error al cargar: ' + sbErrMsg(error)); showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error'); if (diagBox) diagBox.textContent = 'Diagnóstico: ' + sbErrMsg(error); return; }
   if (!adminTbody) return;
   adminTbody.innerHTML = '';
@@ -1753,7 +1810,7 @@ async function renderAdmin() {
     tr.innerHTML = `
       <td>${sanitize(r.correlativo)}</td><td>${sanitize(r.nombre)}</td><td>${sanitize(r.telefono)}</td>
       <td>${sanitize(r.colegiado_numero||'')}</td><td>${sanitize(r.colegiado_activo)}</td>
-      <td title="${sanitize(r.actividad)}">${sanitize(r.actividad.slice(0,40))}${r.actividad.length>40?'…':''}</td>
+      <td title="${sanitize(r.actividad)}">${sanitize(String(r.actividad||'').slice(0,40))}${String(r.actividad||'').length>40?'…':''}</td>
       <td>${sanitize(r.institucion)}</td><td>${sanitize(r.tipo)}</td><td>${sanitize(r.fecha)}</td>
       <td>${r.horas}</td><td>${r.creditos}</td>
       <td>${r.archivo_url||''}</td><td class="mono">${sanitize(r.hash)}</td><td>${estado}</td>
@@ -1765,7 +1822,6 @@ async function renderAdmin() {
     adminTbody.appendChild(tr);
   }
   if (diagBox) diagBox.textContent = `Diagnóstico: deleted_at=${__HAS_DELETED_AT ? 'sí' : 'no'}. Registros cargados: ${rows?.length || 0}.`;
-  const countInfo = document.getElementById('adminCountInfo');
   if (countInfo) {
     const { from, to } = getAdminDateBounds();
     const periodo = from || to ? ` · ${from || '…'} a ${to || '…'}` : '';
@@ -1789,6 +1845,14 @@ document.getElementById('adminYearFilter')?.addEventListener('change', () => {
 });
 document.getElementById('adminDateFrom')?.addEventListener('change', () => renderAdmin());
 document.getElementById('adminDateTo')?.addEventListener('change', () => renderAdmin());
+document.getElementById('adminCurrentMonth')?.addEventListener('click', () => {
+  const { from, to } = currentMonthBounds();
+  const fromEl = document.getElementById('adminDateFrom');
+  const toEl = document.getElementById('adminDateTo');
+  if (fromEl) fromEl.value = from;
+  if (toEl) toEl.value = to;
+  renderAdmin();
+});
 document.getElementById('adminClearDates')?.addEventListener('click', () => {
   const fromEl = document.getElementById('adminDateFrom');
   const toEl = document.getElementById('adminDateTo');
@@ -1823,13 +1887,8 @@ document.getElementById('adminTable')?.addEventListener('click', async e => {
 
 exportCSVBtn?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
-  let q = sb.from('registros').select('*').order('created_at', { ascending: false });
-  if (__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
-  if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
-  const { from: dF, to: dT } = getAdminDateBounds();
-  if (dF) q = q.gte('fecha', dF);
-  if (dT) q = q.lte('fecha', dT);
-  const { data: rows, error } = await q;
+  exportStatus && (exportStatus.textContent = 'Preparando exportación…');
+  const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
   if (error) { showToast('Error al exportar (RLS): ' + sbErrMsg(error), 'error'); return; }
   if (!rows?.length) return showToast('Sin registros', 'warn');
   const headers = Object.keys(rows[0]);
@@ -1843,13 +1902,8 @@ exportCSVBtn?.addEventListener('click', async () => {
 
 exportXLSXBtn?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
-  let q = sb.from('registros').select('*').order('created_at', { ascending: false });
-  if (__HAS_DELETED_AT && !showDeleted?.checked) q = q.is('deleted_at', null);
-  if (currentAdminFilter) q = q.eq('correlativo', currentAdminFilter);
-  const { from: dF, to: dT } = getAdminDateBounds();
-  if (dF) q = q.gte('fecha', dF);
-  if (dT) q = q.lte('fecha', dT);
-  const { data: rows, error } = await q;
+  exportStatus && (exportStatus.textContent = 'Preparando exportación…');
+  const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
   if (error) { showToast('Error al exportar (RLS): ' + sbErrMsg(error), 'error'); return; }
   if (!rows?.length) return showToast('Sin registros', 'warn');
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -1858,6 +1912,431 @@ exportXLSXBtn?.addEventListener('click', async () => {
   XLSX.writeFile(wb, `registros_cpg_${new Date().toISOString().slice(0,10)}.xlsx`);
   exportStatus && (exportStatus.textContent = 'Excel descargado');
 });
+
+/* =======================================================
+   Panel Admin: Reporte de uso (gráficas, estadísticas e informe imprimible)
+======================================================= */
+const REP_COLORS = ['#3b82f6', '#14b8a6', '#f59e0b', '#8b5cf6', '#f43f5e', '#22c55e', '#0ea5e9', '#eab308', '#ec4899', '#64748b'];
+const REP_WEEKDAYS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+let __REP_CHARTS = [];
+let __REP_DATA = null;
+let __REP_SEQ = 0;
+
+function fmtNum(n, dec = 0) {
+  return Number(n || 0).toLocaleString('es-GT', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function fmtLongDate(ymd) {
+  if (!ymd) return '—';
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('es-GT', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function monthLabel(key, long = false) {
+  const [y, m] = key.split('-').map(Number);
+  const s = new Date(y, m - 1, 1).toLocaleDateString('es-GT', { month: long ? 'long' : 'short', year: 'numeric' });
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function nextDayStr(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return localDateStr(new Date(y, m - 1, d + 1));
+}
+function repUserKey(r) {
+  return String(r.colegiado_numero || '').trim() || r.usuario_id || String(r.nombre || '').trim().toLowerCase() || `id:${r.id}`;
+}
+function repIsAulaVirtual(r) {
+  return /aula virtual/i.test(`${r.observaciones || ''} ${r.institucion || ''}`);
+}
+
+function getReportBounds() {
+  const from = (document.getElementById('repFrom')?.value || '').trim();
+  const to = (document.getElementById('repTo')?.value || '').trim();
+  if (from || to) return { from: from || null, to: to || null };
+  const y = document.getElementById('repYear')?.value || String(new Date().getFullYear());
+  if (y === 'all' || !/^\d{4}$/.test(y)) return { from: null, to: null };
+  return { from: `${y}-01-01`, to: `${y}-12-31` };
+}
+
+// Aplica el rango del reporte a una consulta según la fecha elegida como base
+function applyRepRange(q, basis, from, to) {
+  if (basis === 'created_at') {
+    if (from) q = q.gte('created_at', new Date(`${from}T00:00:00`).toISOString());
+    if (to) q = q.lt('created_at', new Date(`${nextDayStr(to)}T00:00:00`).toISOString());
+  } else {
+    if (from) q = q.gte('fecha', from);
+    if (to) q = q.lte('fecha', to);
+  }
+  return q;
+}
+
+function computeReportStats(rows, allRows, basis, bounds) {
+  const dateOf = r => basis === 'created_at'
+    ? (r.created_at ? localDateStr(new Date(r.created_at)) : '')
+    : String(r.fecha || '').slice(0, 10);
+
+  // Primera aparición histórica de cada usuario (para distinguir nuevos vs. recurrentes)
+  const firstSeen = new Map();
+  for (const r of allRows) {
+    const k = repUserKey(r); const d = dateOf(r);
+    if (!d) continue;
+    if (!firstSeen.has(k) || d < firstSeen.get(k)) firstSeen.set(k, d);
+  }
+
+  const dates = rows.map(dateOf).filter(Boolean).sort();
+  const from = bounds.from || dates[0] || localDateStr(new Date());
+  const to = bounds.to || dates[dates.length - 1] || localDateStr(new Date());
+
+  // Meses continuos del período
+  const months = [];
+  {
+    let [y, m] = from.slice(0, 7).split('-').map(Number);
+    const [ty, tm] = to.slice(0, 7).split('-').map(Number);
+    while (y < ty || (y === ty && m <= tm)) {
+      months.push(`${y}-${pad2(m)}`);
+      m++; if (m > 12) { m = 1; y++; }
+      if (months.length > 600) break;
+    }
+  }
+  const byMonth = new Map(months.map(k => [k, { count: 0, users: new Set(), newUsers: new Set(), horas: 0, creditos: 0 }]));
+
+  const perUser = new Map();
+  const byTipo = new Map(), byInst = new Map(), byAct = new Map();
+  const weekday = Array(7).fill(0);
+  let horas = 0, creditos = 0, aula = 0, activoSi = 0, activoNo = 0;
+
+  for (const r of rows) {
+    const k = repUserKey(r); const d = dateOf(r);
+    const h = Number(r.horas) || 0; const c = Number(r.creditos) || 0;
+    horas += h; creditos += c;
+    perUser.set(k, (perUser.get(k) || 0) + 1);
+    const tipo = String(r.tipo || 'Sin especificar').trim() || 'Sin especificar';
+    byTipo.set(tipo, (byTipo.get(tipo) || 0) + 1);
+    const inst = String(r.institucion || 'Sin especificar').trim() || 'Sin especificar';
+    byInst.set(inst, (byInst.get(inst) || 0) + 1);
+    const actName = String(r.actividad || 'Sin especificar').trim() || 'Sin especificar';
+    const act = byAct.get(actName) || { count: 0, users: new Set(), horas: 0 };
+    act.count++; act.users.add(k); act.horas += h; byAct.set(actName, act);
+    if (repIsAulaVirtual(r)) aula++;
+    const activo = String(r.colegiado_activo || '').toLowerCase();
+    if (activo === 'sí' || activo === 'si' || activo === 'true') activoSi++; else activoNo++;
+    if (d) {
+      const [y, m, dd] = d.split('-').map(Number);
+      weekday[new Date(y, m - 1, dd).getDay()]++;
+      const mb = byMonth.get(d.slice(0, 7));
+      if (mb) {
+        mb.count++; mb.users.add(k); mb.horas += h; mb.creditos += c;
+        if ((firstSeen.get(k) || d).slice(0, 7) === d.slice(0, 7)) mb.newUsers.add(k);
+      }
+    }
+  }
+
+  const uniqueUsers = perUser.size;
+  const counts = Array.from(perUser.values());
+  const recurrent = counts.filter(n => n >= 2).length;
+  const newUsers = Array.from(perUser.keys()).filter(k => (firstSeen.get(k) || from) >= from).length;
+  const freqBuckets = [['1 registro', n => n === 1], ['2 registros', n => n === 2], ['3 a 5', n => n >= 3 && n <= 5], ['6 a 10', n => n >= 6 && n <= 10], ['Más de 10', n => n > 10]]
+    .map(([label, fn]) => [label, counts.filter(fn).length]);
+
+  const monthly = months.map(k => {
+    const mb = byMonth.get(k);
+    return { key: k, label: monthLabel(k), count: mb.count, users: mb.users.size, newUsers: mb.newUsers.size, returning: mb.users.size - mb.newUsers.size, horas: mb.horas, creditos: mb.creditos };
+  });
+  let cumul = 0; monthly.forEach(m => { cumul += m.count; m.cumul = cumul; });
+  const activeMonths = monthly.filter(m => m.count > 0);
+  const peak = monthly.reduce((a, b) => (b.count > (a?.count || 0) ? b : a), null);
+  const sortDesc = map => Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+
+  return {
+    basis, from, to, rows,
+    total: rows.length, uniqueUsers, recurrent,
+    recurrentPct: uniqueUsers ? (recurrent / uniqueUsers) * 100 : 0,
+    newUsers, returningUsers: uniqueUsers - newUsers,
+    horas, creditos, aula, manual: rows.length - aula, activoSi, activoNo,
+    avgPerUser: uniqueUsers ? rows.length / uniqueUsers : 0,
+    avgPerMonth: activeMonths.length ? rows.length / activeMonths.length : 0,
+    activeMonths: activeMonths.length, peak,
+    instituciones: byInst.size, actividades: byAct.size,
+    monthly, freqBuckets, weekday,
+    tipos: sortDesc(byTipo),
+    instTop: sortDesc(byInst).slice(0, 10),
+    actTop: Array.from(byAct.entries()).map(([name, a]) => ({ name, count: a.count, users: a.users.size, horas: a.horas }))
+      .sort((a, b) => b.count - a.count).slice(0, 15),
+  };
+}
+
+function reportKpis(st) {
+  return [
+    ['Ingresos registrados', fmtNum(st.total), 'Constancias cargadas en el período'],
+    ['Usuarios únicos', fmtNum(st.uniqueUsers), 'Colegiados distintos que usaron el sistema'],
+    ['Usuarios recurrentes', fmtNum(st.recurrent), `${fmtNum(st.recurrentPct, 1)}% volvió a registrar (2 o más)`],
+    ['Usuarios nuevos', fmtNum(st.newUsers), 'Primer uso del sistema dentro del período'],
+    ['Promedio por usuario', fmtNum(st.avgPerUser, 2), 'Registros por colegiado'],
+    ['Promedio mensual', fmtNum(st.avgPerMonth, 1), `Ingresos por mes activo (${st.activeMonths} meses)`],
+    ['Horas acreditadas', fmtNum(st.horas, 1), 'Suma de horas registradas'],
+    ['Créditos acreditados', fmtNum(st.creditos, 2), '1 crédito = 16 horas (Art. 16)'],
+    ['Mes de mayor uso', st.peak?.count ? monthLabel(st.peak.key, true) : '—', st.peak?.count ? `${fmtNum(st.peak.count)} ingresos` : ''],
+    ['Instituciones', fmtNum(st.instituciones), 'Entidades formadoras distintas'],
+    ['Actividades distintas', fmtNum(st.actividades), 'Cursos, talleres y eventos'],
+    ['Desde Aula Virtual', fmtNum(st.aula), `${st.total ? fmtNum((st.aula / st.total) * 100, 1) : 0}% de los ingresos`],
+  ];
+}
+
+function buildReportChartConfigs(st, theme) {
+  const text = theme === 'print' ? '#1f2937' : '#cbd5e1';
+  const grid = theme === 'print' ? '#e5e7eb' : '#243055';
+  const labels = st.monthly.map(m => m.label);
+  const scales = (extra = {}) => ({
+    x: { ticks: { color: text }, grid: { color: grid }, ...extra.x },
+    y: { beginAtZero: true, ticks: { color: text, precision: 0 }, grid: { color: grid }, ...extra.y },
+    ...extra.more,
+  });
+  const base = { responsive: true, maintainAspectRatio: false, animation: theme === 'print' ? false : undefined,
+    plugins: { legend: { labels: { color: text } } } };
+  const pie = (lbls, data) => ({ type: 'doughnut', data: { labels: lbls, datasets: [{ data, backgroundColor: REP_COLORS, borderColor: theme === 'print' ? '#fff' : '#121936', borderWidth: 2 }] },
+    options: { ...base, plugins: { legend: { position: 'right', labels: { color: text } } } } });
+  return {
+    chMonthly: { type: 'bar', data: { labels, datasets: [
+      { type: 'bar', label: 'Ingresos', data: st.monthly.map(m => m.count), backgroundColor: REP_COLORS[0], borderRadius: 4, order: 2 },
+      { type: 'line', label: 'Usuarios únicos', data: st.monthly.map(m => m.users), borderColor: REP_COLORS[2], backgroundColor: REP_COLORS[2], tension: .3, order: 1 },
+    ] }, options: { ...base, scales: scales() } },
+    chTipo: pie(st.tipos.map(t => t[0]), st.tipos.map(t => t[1])),
+    chNewRet: { type: 'bar', data: { labels, datasets: [
+      { label: 'Nuevos', data: st.monthly.map(m => m.newUsers), backgroundColor: REP_COLORS[1], borderRadius: 4 },
+      { label: 'Recurrentes', data: st.monthly.map(m => m.returning), backgroundColor: REP_COLORS[3], borderRadius: 4 },
+    ] }, options: { ...base, scales: scales({ x: { stacked: true }, y: { stacked: true } }) } },
+    chCredits: { type: 'bar', data: { labels, datasets: [
+      { label: 'Créditos', data: st.monthly.map(m => +m.creditos.toFixed(2)), backgroundColor: REP_COLORS[5], borderRadius: 4, yAxisID: 'y' },
+      { type: 'line', label: 'Horas', data: st.monthly.map(m => +m.horas.toFixed(1)), borderColor: REP_COLORS[6], backgroundColor: REP_COLORS[6], tension: .3, yAxisID: 'y1' },
+    ] }, options: { ...base, scales: scales({ y: { title: { display: true, text: 'Créditos', color: text } },
+      more: { y1: { position: 'right', beginAtZero: true, ticks: { color: text }, grid: { drawOnChartArea: false }, title: { display: true, text: 'Horas', color: text } } } }) } },
+    chCumul: { type: 'line', data: { labels, datasets: [
+      { label: 'Ingresos acumulados', data: st.monthly.map(m => m.cumul), borderColor: REP_COLORS[0], backgroundColor: 'rgba(59,130,246,.18)', fill: true, tension: .3 },
+    ] }, options: { ...base, scales: scales() } },
+    chFreq: { type: 'bar', data: { labels: st.freqBuckets.map(b => b[0]), datasets: [
+      { label: 'Usuarios', data: st.freqBuckets.map(b => b[1]), backgroundColor: REP_COLORS[3], borderRadius: 4 },
+    ] }, options: { ...base, plugins: { legend: { display: false } }, scales: scales() } },
+    chOrigen: pie(['Aula Virtual CPG', 'Carga manual de constancia'], [st.aula, st.manual]),
+    chWeekday: { type: 'bar', data: { labels: REP_WEEKDAYS, datasets: [
+      { label: 'Ingresos', data: st.weekday, backgroundColor: REP_COLORS[6], borderRadius: 4 },
+    ] }, options: { ...base, plugins: { legend: { display: false } }, scales: scales() } },
+    chActivo: pie(['Activo', 'No activo / sin dato'], [st.activoSi, st.activoNo]),
+    chInst: { type: 'bar', data: { labels: st.instTop.map(i => i[0].length > 45 ? i[0].slice(0, 45) + '…' : i[0]), datasets: [
+      { label: 'Ingresos', data: st.instTop.map(i => i[1]), backgroundColor: REP_COLORS[0], borderRadius: 4 },
+    ] }, options: { ...base, indexAxis: 'y', plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { color: text, precision: 0 }, grid: { color: grid } }, y: { ticks: { color: text }, grid: { color: grid } } } } },
+  };
+}
+
+function repMonthTableHtml(st) {
+  const head = '<thead><tr><th>Mes</th><th>Ingresos</th><th>Usuarios únicos</th><th>Nuevos</th><th>Recurrentes</th><th>Horas</th><th>Créditos</th></tr></thead>';
+  const body = st.monthly.map(m => `<tr><td>${sanitize(monthLabel(m.key, true))}</td><td>${fmtNum(m.count)}</td><td>${fmtNum(m.users)}</td><td>${fmtNum(m.newUsers)}</td><td>${fmtNum(m.returning)}</td><td>${fmtNum(m.horas, 1)}</td><td>${fmtNum(m.creditos, 2)}</td></tr>`).join('');
+  const foot = `<tfoot><tr><th>Total</th><th>${fmtNum(st.total)}</th><th>${fmtNum(st.uniqueUsers)}</th><th>${fmtNum(st.newUsers)}</th><th>${fmtNum(st.returningUsers)}</th><th>${fmtNum(st.horas, 1)}</th><th>${fmtNum(st.creditos, 2)}</th></tr></tfoot>`;
+  return head + `<tbody>${body}</tbody>` + foot;
+}
+function repActTableHtml(st) {
+  const head = '<thead><tr><th>#</th><th>Actividad</th><th>Ingresos</th><th>Usuarios</th><th>Horas</th></tr></thead>';
+  const body = st.actTop.map((a, i) => `<tr><td>${i + 1}</td><td style="white-space:normal">${sanitize(a.name)}</td><td>${fmtNum(a.count)}</td><td>${fmtNum(a.users)}</td><td>${fmtNum(a.horas, 1)}</td></tr>`).join('');
+  return head + `<tbody>${body || '<tr><td colspan="5">Sin datos</td></tr>'}</tbody>`;
+}
+function repSimpleTableHtml(title, rows, total) {
+  return `<thead><tr><th>${sanitize(title)}</th><th>Ingresos</th><th>%</th></tr></thead><tbody>` +
+    rows.map(([k, v]) => `<tr><td style="white-space:normal">${sanitize(k)}</td><td>${fmtNum(v)}</td><td>${total ? fmtNum((v / total) * 100, 1) : 0}%</td></tr>`).join('') + '</tbody>';
+}
+
+async function renderReport() {
+  const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
+  const status = document.getElementById('repStatus');
+  const seq = ++__REP_SEQ;
+  await ensureYearFilters();
+  if (status) status.textContent = 'Cargando datos del período…';
+  const basis = document.getElementById('repBasis')?.value || 'created_at';
+  const bounds = getReportBounds();
+  const notDeleted = q => (__HAS_DELETED_AT ? q.is('deleted_at', null) : q);
+  const [cur, hist] = await Promise.all([
+    fetchAllRows(() => applyRepRange(notDeleted(sb.from('registros').select('*')), basis, bounds.from, bounds.to)
+      .order(basis, { ascending: true }).order('id', { ascending: true })),
+    fetchAllRows(() => notDeleted(sb.from('registros').select('id,usuario_id,colegiado_numero,nombre,fecha,created_at'))
+      .order('id', { ascending: true })),
+  ]);
+  if (seq !== __REP_SEQ) return; // llegó una consulta más reciente
+  const error = cur.error || hist.error;
+  if (error) { if (status) status.textContent = 'Error al cargar: ' + sbErrMsg(error); showToast('No se pudo cargar el reporte: ' + sbErrMsg(error), 'error'); return; }
+
+  ensurePdfLogoDataUrl().catch(() => {}); // precarga el logo para el informe impreso
+  const st = computeReportStats(cur.data, hist.data, basis, bounds);
+  __REP_DATA = st;
+  if (status) {
+    const basisTxt = basis === 'created_at' ? 'fecha de ingreso al sistema' : 'fecha de la actividad';
+    status.textContent = `Período ${fmtLongDate(st.from)} al ${fmtLongDate(st.to)} · ${fmtNum(st.total)} registro(s) activos · por ${basisTxt}. Se excluyen registros eliminados.`;
+  }
+  const kpis = document.getElementById('repKpis');
+  if (kpis) kpis.innerHTML = reportKpis(st).map(([l, v, s]) => `<div class="rep-kpi"><div class="v">${sanitize(v)}</div><div class="l">${sanitize(l)}</div><div class="s">${sanitize(s)}</div></div>`).join('');
+  const mt = document.getElementById('repMonthTable'); if (mt) mt.innerHTML = repMonthTableHtml(st);
+  const at = document.getElementById('repActTable'); if (at) at.innerHTML = repActTableHtml(st);
+
+  __REP_CHARTS.forEach(c => c.destroy()); __REP_CHARTS = [];
+  if (!window.Chart) { if (status) status.textContent += ' (No se pudo cargar la librería de gráficas.)'; return; }
+  const cfgs = buildReportChartConfigs(st, 'screen');
+  for (const [id, cfg] of Object.entries(cfgs)) {
+    const cv = document.getElementById(id);
+    if (cv) __REP_CHARTS.push(new Chart(cv, cfg));
+  }
+}
+
+// Dibuja las gráficas fuera de pantalla con colores para papel y las devuelve como imágenes
+function renderReportChartImages(st) {
+  const out = {};
+  if (!window.Chart) return out;
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:420px';
+  document.body.appendChild(host);
+  try {
+    for (const [id, cfg] of Object.entries(buildReportChartConfigs(st, 'print'))) {
+      const cv = document.createElement('canvas');
+      const wide = id === 'chMonthly' || id === 'chInst';
+      cv.width = wide ? 900 : 560; cv.height = id === 'chInst' ? 480 : wide ? 400 : 360;
+      host.innerHTML = ''; host.appendChild(cv);
+      cfg.options = { ...cfg.options, responsive: false, devicePixelRatio: 2 };
+      const ch = new Chart(cv, cfg);
+      out[id] = cv.toDataURL('image/png');
+      ch.destroy();
+    }
+  } finally { host.remove(); }
+  return out;
+}
+
+const REP_CHART_TITLES = {
+  chMonthly: 'Ingresos y usuarios únicos por mes', chTipo: 'Tipo de actividad',
+  chNewRet: 'Usuarios nuevos y recurrentes por mes', chCredits: 'Créditos y horas acreditadas por mes',
+  chCumul: 'Crecimiento acumulado de ingresos', chFreq: 'Frecuencia de uso por usuario',
+  chOrigen: 'Origen del registro', chWeekday: 'Ingresos por día de la semana',
+  chActivo: 'Estado de colegiatura declarado', chInst: 'Instituciones con más registros (Top 10)',
+};
+
+function printDocShell(title, bodyHtml, extraCss = '') {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${sanitize(title)}</title>
+<style>
+  @page{size:letter;margin:16mm 14mm}
+  *{box-sizing:border-box}
+  body{font:12px/1.5 Georgia,'Times New Roman',serif;color:#111827;margin:0;background:#fff}
+  .wrap{max-width:820px;margin:0 auto;padding:16px}
+  h1{font-size:18px;margin:0}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #d1d5db;padding-bottom:4px}
+  table{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:11px}
+  th,td{border:1px solid #d1d5db;padding:4px 6px;text-align:left;vertical-align:top}
+  th{background:#f3f4f6}
+  .toolbar{position:sticky;top:0;background:#0f172a;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;font:13px system-ui,sans-serif;z-index:5}
+  .toolbar button{background:#3b82f6;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
+  @media print{.toolbar{display:none}.wrap{padding:0;max-width:none}}
+  ${extraCss}
+</style></head><body>${bodyHtml}</body></html>`;
+}
+
+function openPrintWindow(html) {
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Permite las ventanas emergentes para imprimir.', 'warn'); return null; }
+  w.document.open(); w.document.write(html); w.document.close();
+  return w;
+}
+
+function detailTableHtml(rows, opts = {}) {
+  const head = `<thead><tr><th>#</th><th>Correlativo</th><th>Ingreso</th><th>Fecha act.</th><th>Nombre</th><th>Colegiado</th><th>Actividad</th><th>Institución</th><th>Tipo</th><th>Horas</th><th>Créditos</th>${opts.estado ? '<th>Estado</th>' : ''}</tr></thead>`;
+  const body = rows.map((r, i) => `<tr><td>${i + 1}</td><td>${sanitize(r.correlativo)}</td><td>${r.created_at ? localDateStr(new Date(r.created_at)) : ''}</td><td>${sanitize(r.fecha)}</td><td>${sanitize(r.nombre)}</td><td>${sanitize(r.colegiado_numero)}</td><td>${sanitize(r.actividad)}</td><td>${sanitize(r.institucion)}</td><td>${sanitize(r.tipo)}</td><td>${fmtNum(r.horas, 1)}</td><td>${fmtNum(r.creditos, 2)}</td>${opts.estado ? `<td>${r.deleted_at ? 'Eliminado' : 'Activo'}</td>` : ''}</tr>`).join('');
+  return `<table class="detail">${head}<tbody>${body}</tbody></table>`;
+}
+
+function printReport() {
+  const st = __REP_DATA;
+  if (!st) { showToast('Primero carga el reporte.', 'warn'); return; }
+  const imgs = renderReportChartImages(st);
+  const includeDetail = document.getElementById('repIncludeDetail')?.checked;
+  const logo = __PDF_LOGO_DATAURL || new URL('./assets/Logo-cpg.png', location.href).href;
+  const today = fmtLongDate(localDateStr(new Date()));
+  const periodo = `del ${fmtLongDate(st.from)} al ${fmtLongDate(st.to)}`;
+  const basisTxt = st.basis === 'created_at' ? 'la fecha de ingreso de cada registro al sistema' : 'la fecha en que se realizó cada actividad';
+  const tipoTxt = st.tipos.map(([k, v]) => `${k.toLowerCase()} (${fmtNum(v)}; ${fmtNum(st.total ? (v / st.total) * 100 : 0, 1)}%)`).join(', ');
+  const kpiRows = reportKpis(st).map(([l, v, s]) => `<tr><td>${sanitize(l)}</td><td><strong>${sanitize(v)}</strong></td><td>${sanitize(s)}</td></tr>`).join('');
+  const charts = Object.entries(imgs).map(([id, src]) => `<figure class="${id === 'chMonthly' || id === 'chInst' ? 'wide' : ''}"><img src="${src}" alt="${sanitize(REP_CHART_TITLES[id])}"><figcaption>${sanitize(REP_CHART_TITLES[id])}</figcaption></figure>`).join('');
+
+  const body = `
+<div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button><span>Puede hacer clic sobre el texto para editarlo antes de imprimir.</span></div>
+<div class="wrap" contenteditable="true">
+  <div class="head"><img src="${logo}" alt="CPG"><div><h1>Colegio de Psicólogos de Guatemala</h1><div>Sistema de Registro de Créditos Académicos</div></div></div>
+  <p style="text-align:right">Guatemala, ${sanitize(today)}</p>
+  <p>Señores<br><strong>Comisión de Acreditación y Educación Continua (CAEDUC)</strong><br><strong>Honorable Junta Directiva</strong><br>Colegio de Psicólogos de Guatemala<br>Presente</p>
+  <p><strong>Asunto:</strong> Informe estadístico de uso del Sistema de Registro de Créditos Académicos, período ${sanitize(periodo)}.</p>
+  <p>Estimados señores:</p>
+  <p>Por medio de la presente se somete a su consideración el informe estadístico de uso del Sistema de Registro de Créditos Académicos del Colegio de Psicólogos de Guatemala, correspondiente al período ${sanitize(periodo)}. Los datos fueron obtenidos directamente de la base de datos del sistema, considerando ${sanitize(basisTxt)}, e incluyen únicamente registros vigentes (se excluyen los registros eliminados).</p>
+
+  <h2>1. Indicadores generales</h2>
+  <table><thead><tr><th>Indicador</th><th>Valor</th><th>Descripción</th></tr></thead><tbody>${kpiRows}</tbody></table>
+
+  <h2>2. Análisis de uso</h2>
+  <p>Durante el período se registraron <strong>${fmtNum(st.total)}</strong> ingresos realizados por <strong>${fmtNum(st.uniqueUsers)}</strong> colegiados distintos, con un promedio de ${fmtNum(st.avgPerUser, 2)} registros por colegiado. De ellos, <strong>${fmtNum(st.recurrent)}</strong> (${fmtNum(st.recurrentPct, 1)}%) utilizaron el sistema en dos o más ocasiones, y <strong>${fmtNum(st.newUsers)}</strong> lo utilizaron por primera vez dentro del período.</p>
+  <p>El sistema tuvo actividad en ${fmtNum(st.activeMonths)} mes(es), con un promedio de ${fmtNum(st.avgPerMonth, 1)} ingresos por mes activo${st.peak?.count ? `; el mes de mayor uso fue ${sanitize(monthLabel(st.peak.key, true))} con ${fmtNum(st.peak.count)} ingresos` : ''}. Se acreditaron en total ${fmtNum(st.horas, 1)} horas, equivalentes a ${fmtNum(st.creditos, 2)} créditos académicos (Art. 16: 1 crédito = 16 horas).</p>
+  <p>Por tipo de actividad, la distribución fue: ${sanitize(tipoTxt || 'sin datos')}. Los registros provienen de ${fmtNum(st.instituciones)} instituciones formadoras y ${fmtNum(st.actividades)} actividades distintas; ${fmtNum(st.aula)} ingresos se importaron desde el Aula Virtual CPG y ${fmtNum(st.manual)} se realizaron mediante carga manual de constancia.</p>
+
+  <h2>3. Gráficas</h2>
+  <div class="charts">${charts || '<p>No fue posible generar las gráficas.</p>'}</div>
+
+  <h2>4. Resumen mensual</h2>
+  <table>${repMonthTableHtml(st)}</table>
+
+  <h2>5. Distribución por tipo de actividad</h2>
+  <table>${repSimpleTableHtml('Tipo de actividad', st.tipos, st.total)}</table>
+
+  <h2>6. Instituciones con más registros (Top 10)</h2>
+  <table>${repSimpleTableHtml('Institución', st.instTop, st.total)}</table>
+
+  <h2>7. Actividades más registradas (Top 15)</h2>
+  <table>${repActTableHtml(st)}</table>
+
+  <h2>8. Conclusión</h2>
+  <p>Los indicadores presentados evidencian el uso sostenido del sistema por parte de los colegiados como herramienta para registrar y acreditar su formación continua, así como su aporte a la trazabilidad y verificación de los créditos académicos. Con base en esta información, se somete a su consideración la continuidad y ampliación del proyecto.</p>
+  <p>Sin otro particular, me suscribo atentamente.</p>
+  <div class="sign"><div class="line"></div><div>Nombre y firma</div><div>Cargo</div></div>
+
+  ${includeDetail ? `<div class="annex"><h2>Anexo: detalle de registros del período (${fmtNum(st.rows.length)})</h2>${detailTableHtml(st.rows)}</div>` : ''}
+</div>`;
+  const css = `
+  .head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1e3a8a;padding-bottom:10px;margin-bottom:12px}
+  .head img{height:64px}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .charts figure{margin:0;break-inside:avoid;page-break-inside:avoid;border:1px solid #e5e7eb;padding:6px}
+  .charts figure.wide{grid-column:1 / -1}
+  .charts img{width:100%;height:auto;display:block}
+  figcaption{font-size:11px;text-align:center;color:#374151;margin-top:4px}
+  tr{break-inside:avoid;page-break-inside:avoid}
+  h2{break-after:avoid;page-break-after:avoid}
+  .sign{margin:60px 0 0;width:260px;text-align:center}.sign .line{border-top:1px solid #111;margin-bottom:4px}
+  .annex{break-before:page;page-break-before:always}
+  .detail{font-size:9px}.detail td,.detail th{padding:2px 4px}`;
+  openPrintWindow(printDocShell(`Informe de uso ${st.from} a ${st.to}`, body, css));
+}
+
+async function printRegistrosListado() {
+  const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
+  // Abrir la ventana antes de la consulta para que el navegador no la bloquee
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Permite las ventanas emergentes para imprimir.', 'warn'); return; }
+  w.document.write('<p style="font:14px system-ui;padding:20px">Cargando todos los registros…</p>');
+  const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
+  if (error) { w.close(); showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error'); return; }
+  const { from, to } = getAdminDateBounds();
+  const periodo = from || to ? `${fmtLongDate(from)} al ${fmtLongDate(to)}` : 'todos los registros';
+  const body = `<div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button><span>${fmtNum(rows.length)} registro(s)</span></div>
+<div class="wrap" style="max-width:none"><h1>Registros de créditos académicos</h1><p>Período (fecha de actividad): ${sanitize(periodo)} · Total: ${fmtNum(rows.length)} registro(s)</p>${detailTableHtml(rows, { estado: true })}</div>`;
+  w.document.open();
+  w.document.write(printDocShell('Registros de créditos académicos', body, '@page{size:letter landscape}.detail{font-size:9px}.detail td,.detail th{padding:2px 4px}tr{break-inside:avoid}'));
+  w.document.close();
+}
+
+['repYear'].forEach(id => document.getElementById(id)?.addEventListener('change', () => {
+  const f = document.getElementById('repFrom'); const t = document.getElementById('repTo');
+  if (f) f.value = ''; if (t) t.value = '';
+  renderReport();
+}));
+['repFrom', 'repTo', 'repBasis'].forEach(id => document.getElementById(id)?.addEventListener('change', () => renderReport()));
+document.getElementById('repRefresh')?.addEventListener('click', () => renderReport());
+document.getElementById('repPrint')?.addEventListener('click', () => printReport());
+document.getElementById('printRegistros')?.addEventListener('click', () => printRegistrosListado());
 
 /* Gestión de usuarios (superadmin) */
 userCheckBtn?.addEventListener('click', async () => {

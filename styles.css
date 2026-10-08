@@ -455,3 +455,16 @@ body.admin-mode #adminSection .admin-tab-panel{ flex:1; overflow:auto; padding:1
   .admin-section-topbar{flex-direction:column;align-items:flex-start}
   .admin-section-title h2{font-size:15px}
 }
+
+/* ===== REPORTE DE USO (panel admin) ===== */
+.rep-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.rep-kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.rep-kpi .v{font-size:26px;font-weight:800;line-height:1.1}
+.rep-kpi .l{font-size:13px;color:var(--muted);margin-top:4px}
+.rep-kpi .s{font-size:12px;color:var(--muted);margin-top:2px}
+.rep-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:16px}
+.rep-wide{grid-column:1 / -1}
+.rep-chart h4{margin:0 0 10px;font-size:15px}
+.rep-canvas{position:relative;height:280px}
+.rep-canvas-tall{height:360px}
+@media (max-width:900px){ .rep-grid{grid-template-columns:1fr} }
