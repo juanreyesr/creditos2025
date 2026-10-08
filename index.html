@@ -6,19 +6,20 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
   <style>.modal{display:none}</style>
-  <link rel="stylesheet" href="./styles.css?v=6" />
+  <link rel="stylesheet" href="./styles.css?v=7" />
   <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js" defer></script>
   <script>
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
-  <script src="./script.js?v=29" defer></script>
+  <script src="./script.js?v=30" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -275,13 +276,74 @@
 
       <!-- Tabs de navegación -->
       <nav class="admin-tabs" id="adminTabs">
-        <button class="admin-tab-btn active" data-tab="registros" type="button">📋 Registros</button>
+        <button class="admin-tab-btn active" data-tab="reporte" type="button">📊 Reporte</button>
+        <button class="admin-tab-btn" data-tab="registros" type="button">📋 Gestión de registros</button>
         <button class="admin-tab-btn" data-tab="usuarios" type="button">👥 Usuarios</button>
         <button class="admin-tab-btn" data-tab="configuracion" type="button">⚙️ Configuración</button>
       </nav>
 
+      <!-- ── TAB: REPORTE ── -->
+      <div class="admin-tab-panel" id="adminTab-reporte">
+        <div class="card" style="margin-bottom:16px">
+          <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:13px">
+              Año
+              <select id="repYear" style="min-width:120px"></select>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:13px">
+              Desde
+              <input type="date" id="repFrom" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:13px">
+              Hasta
+              <input type="date" id="repTo" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:13px">
+              Contar por
+              <select id="repBasis">
+                <option value="created_at">Fecha de ingreso al sistema</option>
+                <option value="fecha">Fecha de la actividad</option>
+              </select>
+            </label>
+            <button class="btn" id="repRefresh" type="button">Actualizar</button>
+            <label style="display:flex;gap:6px;align-items:center;margin-left:auto;font-size:13px">
+              <input type="checkbox" id="repIncludeDetail" checked />
+              <span>Incluir anexo con todos los registros</span>
+            </label>
+            <button class="btn primary" id="repPrint" type="button">🖨️ Imprimir informe</button>
+          </div>
+          <p class="muted" id="repStatus" style="margin:10px 0 0;font-size:13px">—</p>
+        </div>
+
+        <div class="rep-kpis" id="repKpis"></div>
+
+        <div class="rep-grid">
+          <div class="card rep-chart rep-wide"><h4>Ingresos y usuarios únicos por mes</h4><div class="rep-canvas"><canvas id="chMonthly"></canvas></div></div>
+          <div class="card rep-chart"><h4>Tipo de actividad</h4><div class="rep-canvas"><canvas id="chTipo"></canvas></div></div>
+          <div class="card rep-chart"><h4>Usuarios nuevos y recurrentes por mes</h4><div class="rep-canvas"><canvas id="chNewRet"></canvas></div></div>
+          <div class="card rep-chart"><h4>Créditos y horas acreditadas por mes</h4><div class="rep-canvas"><canvas id="chCredits"></canvas></div></div>
+          <div class="card rep-chart"><h4>Crecimiento acumulado de ingresos</h4><div class="rep-canvas"><canvas id="chCumul"></canvas></div></div>
+          <div class="card rep-chart"><h4>Frecuencia de uso por usuario</h4><div class="rep-canvas"><canvas id="chFreq"></canvas></div></div>
+          <div class="card rep-chart"><h4>Origen del registro</h4><div class="rep-canvas"><canvas id="chOrigen"></canvas></div></div>
+          <div class="card rep-chart"><h4>Ingresos por día de la semana</h4><div class="rep-canvas"><canvas id="chWeekday"></canvas></div></div>
+          <div class="card rep-chart"><h4>Estado de colegiatura declarado</h4><div class="rep-canvas"><canvas id="chActivo"></canvas></div></div>
+          <div class="card rep-chart rep-wide"><h4>Instituciones con más registros (Top 10)</h4><div class="rep-canvas rep-canvas-tall"><canvas id="chInst"></canvas></div></div>
+        </div>
+
+        <div class="rep-grid">
+          <div class="card rep-wide">
+            <h4 style="margin:0 0 10px">Resumen mensual</h4>
+            <div class="table-wrap"><table class="table" id="repMonthTable"></table></div>
+          </div>
+          <div class="card rep-wide">
+            <h4 style="margin:0 0 10px">Actividades más registradas (Top 15)</h4>
+            <div class="table-wrap"><table class="table" id="repActTable"></table></div>
+          </div>
+        </div>
+      </div>
+
       <!-- ── TAB: REGISTROS ── -->
-      <div class="admin-tab-panel" id="adminTab-registros">
+      <div class="admin-tab-panel" id="adminTab-registros" style="display:none">
         <div class="card">
           <div class="admin-actions" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
             <input type="text" id="adminSearch" placeholder="Buscar correlativo (CPG-AAAAmm-####)" style="flex:1;min-width:240px" />
@@ -301,13 +363,15 @@
               Hasta
               <input type="date" id="adminDateTo" />
             </label>
-            <button class="btn" id="adminClearDates" type="button" title="Limpiar filtros de fecha">Limpiar fechas</button>
+            <button class="btn" id="adminCurrentMonth" type="button" title="Mostrar solo el mes en curso">Mes actual</button>
+            <button class="btn" id="adminClearDates" type="button" title="Limpiar filtros de fecha (usa el año seleccionado)">Limpiar fechas</button>
             <label style="display:flex;gap:6px;align-items:center;margin-left:auto">
               <input type="checkbox" id="showDeleted" />
               <span>Mostrar eliminados</span>
             </label>
             <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
             <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
+            <button class="btn" id="printRegistros" type="button">Imprimir listado</button>
             <span class="muted" id="exportStatus">—</span>
           </div>
           <p class="muted" id="adminCountInfo" style="margin:0 0 8px;font-size:13px">—</p>
