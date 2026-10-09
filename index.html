@@ -6,10 +6,11 @@
   <meta name="color-scheme" content="light dark" />
   <title>Registro de Créditos Académicos — CPG</title>
   <style>.modal{display:none}</style>
-  <link rel="stylesheet" href="./styles.css?v=7" />
+  <link rel="stylesheet" href="./styles.css?v=8" />
   <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" defer></script>
@@ -19,7 +20,7 @@
     window.SB_URL = window.SB_URL || "https://ilyospunwucdojrnfgti.supabase.co";
     window.SB_KEY = window.SB_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlseW9zcHVud3VjZG9qcm5mZ3RpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg4Mjk5NzYsImV4cCI6MjA3NDQwNTk3Nn0.gernmW9y1zuvjPCOFo2ie2_2xFIIRKeZWybft7eeoD4";
   </script>
-  <script src="./script.js?v=30" defer></script>
+  <script src="./script.js?v=31" defer></script>
 </head>
 <body>
   <noscript><div style="background:#fee2e2;color:#991b1b;padding:12px;text-align:center">Esta aplicación requiere JavaScript habilitado.</div></noscript>
@@ -306,11 +307,7 @@
               </select>
             </label>
             <button class="btn" id="repRefresh" type="button">Actualizar</button>
-            <label style="display:flex;gap:6px;align-items:center;margin-left:auto;font-size:13px">
-              <input type="checkbox" id="repIncludeDetail" checked />
-              <span>Incluir anexo con todos los registros</span>
-            </label>
-            <button class="btn primary" id="repPrint" type="button">🖨️ Imprimir informe</button>
+            <button class="btn primary" id="repPrint" type="button" style="margin-left:auto">📄 Generar informe</button>
           </div>
           <p class="muted" id="repStatus" style="margin:10px 0 0;font-size:13px">—</p>
         </div>
@@ -371,7 +368,7 @@
             </label>
             <button class="btn" id="exportCSV" type="button">Exportar CSV</button>
             <button class="btn" id="exportXLSX" type="button">Exportar Excel</button>
-            <button class="btn" id="printRegistros" type="button">Imprimir listado</button>
+            <button class="btn" id="printRegistros" type="button">Descargar listado PDF</button>
             <span class="muted" id="exportStatus">—</span>
           </div>
           <p class="muted" id="adminCountInfo" style="margin:0 0 8px;font-size:13px">—</p>
@@ -635,6 +632,41 @@
           <iframe id="videoIframe" src="" frameborder="0" allowfullscreen allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" title="Guía de uso"></iframe>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- INFORME: selección de contenido -->
+  <div class="rep-overlay" id="repConfigOverlay" aria-hidden="true" role="dialog" aria-labelledby="repConfigTitle">
+    <div class="rep-dialog rep-config">
+      <header class="modal-header">
+        <h3 id="repConfigTitle" style="margin:0">Contenido del informe</h3>
+        <button class="iconbtn" id="repConfigClose" type="button" aria-label="Cerrar">✕</button>
+      </header>
+      <div class="rep-config-body">
+        <p class="muted" style="margin:0 0 12px">Marca lo que quieres que aparezca en el informe.</p>
+        <div class="rep-config-actions">
+          <button class="btn" id="repSelAll" type="button">Marcar todo</button>
+          <button class="btn" id="repSelNone" type="button">Quitar todo</button>
+        </div>
+        <div id="repConfigList"></div>
+      </div>
+      <footer class="rep-config-foot">
+        <button class="btn" id="repConfigCancel" type="button">Cancelar</button>
+        <button class="btn primary" id="repConfigGo" type="button">Ver vista previa</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- INFORME: vista previa -->
+  <div class="rep-overlay" id="repPreviewOverlay" aria-hidden="true" role="dialog" aria-label="Vista previa del informe">
+    <div class="rep-dialog rep-preview">
+      <header class="rep-preview-bar">
+        <button class="btn" id="repPreviewBack" type="button">← Elegir contenido</button>
+        <span class="muted rep-preview-hint">Puedes tocar el texto para editarlo antes de descargar.</span>
+        <button class="btn primary" id="repDownloadPdf" type="button">⬇️ Descargar PDF</button>
+        <button class="iconbtn" id="repPreviewClose" type="button" aria-label="Cerrar">✕</button>
+      </header>
+      <div class="rep-preview-scroll"><div class="rep-paper" id="repPaper"></div></div>
     </div>
   </div>
 

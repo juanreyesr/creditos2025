@@ -2136,11 +2136,6 @@ function repActTableHtml(st) {
   const body = st.actTop.map((a, i) => `<tr><td>${i + 1}</td><td style="white-space:normal">${sanitize(a.name)}</td><td>${fmtNum(a.count)}</td><td>${fmtNum(a.users)}</td><td>${fmtNum(a.horas, 1)}</td></tr>`).join('');
   return head + `<tbody>${body || '<tr><td colspan="5">Sin datos</td></tr>'}</tbody>`;
 }
-function repSimpleTableHtml(title, rows, total) {
-  return `<thead><tr><th>${sanitize(title)}</th><th>Ingresos</th><th>%</th></tr></thead><tbody>` +
-    rows.map(([k, v]) => `<tr><td style="white-space:normal">${sanitize(k)}</td><td>${fmtNum(v)}</td><td>${total ? fmtNum((v / total) * 100, 1) : 0}%</td></tr>`).join('') + '</tbody>';
-}
-
 async function renderReport() {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
   const status = document.getElementById('repStatus');
@@ -2181,28 +2176,38 @@ async function renderReport() {
   }
 }
 
-// Dibuja las gráficas fuera de pantalla con colores para papel y las devuelve como imágenes
-function renderReportChartImages(st) {
+// Dibuja fuera de pantalla, con colores para papel, las gráficas indicadas y las devuelve como imágenes
+function renderReportChartImages(st, ids) {
   const out = {};
   if (!window.Chart) return out;
   const host = document.createElement('div');
-  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:420px';
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:480px';
   document.body.appendChild(host);
   try {
-    for (const [id, cfg] of Object.entries(buildReportChartConfigs(st, 'print'))) {
+    const cfgs = buildReportChartConfigs(st, 'print');
+    for (const id of ids) {
+      const cfg = cfgs[id]; if (!cfg) continue;
       const cv = document.createElement('canvas');
-      const wide = id === 'chMonthly' || id === 'chInst';
-      cv.width = wide ? 900 : 560; cv.height = id === 'chInst' ? 480 : wide ? 400 : 360;
+      const wide = REP_WIDE_CHARTS.includes(id);
+      const w = wide ? 900 : 560, h = id === 'chInst' ? 480 : wide ? 400 : 360;
+      cv.width = w; cv.height = h;
       host.innerHTML = ''; host.appendChild(cv);
       cfg.options = { ...cfg.options, responsive: false, devicePixelRatio: 2 };
       const ch = new Chart(cv, cfg);
-      out[id] = cv.toDataURL('image/png');
+      // JPEG sobre fondo blanco: el PDF pesa mucho menos que con PNG
+      const flat = document.createElement('canvas');
+      flat.width = cv.width; flat.height = cv.height;
+      const ctx = flat.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, flat.width, flat.height);
+      ctx.drawImage(cv, 0, 0);
+      out[id] = { src: flat.toDataURL('image/jpeg', 0.9), w, h };
       ch.destroy();
     }
   } finally { host.remove(); }
   return out;
 }
 
+const REP_WIDE_CHARTS = ['chMonthly', 'chInst'];
 const REP_CHART_TITLES = {
   chMonthly: 'Ingresos y usuarios únicos por mes', chTipo: 'Tipo de actividad',
   chNewRet: 'Usuarios nuevos y recurrentes por mes', chCredits: 'Créditos y horas acreditadas por mes',
@@ -2211,121 +2216,319 @@ const REP_CHART_TITLES = {
   chActivo: 'Estado de colegiatura declarado', chInst: 'Instituciones con más registros (Top 10)',
 };
 
-function printDocShell(title, bodyHtml, extraCss = '') {
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${sanitize(title)}</title>
-<style>
-  @page{size:letter;margin:16mm 14mm}
-  *{box-sizing:border-box}
-  body{font:12px/1.5 Georgia,'Times New Roman',serif;color:#111827;margin:0;background:#fff}
-  .wrap{max-width:820px;margin:0 auto;padding:16px}
-  h1{font-size:18px;margin:0}h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #d1d5db;padding-bottom:4px}
-  table{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:11px}
-  th,td{border:1px solid #d1d5db;padding:4px 6px;text-align:left;vertical-align:top}
-  th{background:#f3f4f6}
-  .toolbar{position:sticky;top:0;background:#0f172a;color:#fff;padding:10px 16px;display:flex;gap:12px;align-items:center;font:13px system-ui,sans-serif;z-index:5}
-  .toolbar button{background:#3b82f6;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-weight:600;cursor:pointer}
-  @media print{.toolbar{display:none}.wrap{padding:0;max-width:none}}
-  ${extraCss}
-</style></head><body>${bodyHtml}</body></html>`;
+// Secciones que se pueden elegir para el informe (orden = orden en el documento)
+const REP_SECTIONS = [
+  { key: 'carta', group: 'Texto', label: 'Carta de presentación', hint: 'Fecha, destinatarios (CAEDUC y Junta Directiva), asunto e introducción' },
+  { key: 'kpis', group: 'Texto', label: 'Indicadores generales', hint: 'Tabla con los 12 indicadores del período' },
+  { key: 'analisis', group: 'Texto', label: 'Análisis de uso', hint: 'Párrafos con la interpretación de los datos' },
+  ...Object.entries(REP_CHART_TITLES).map(([key, label]) => ({ key, group: 'Gráficas', label })),
+  { key: 'mensual', group: 'Tablas', label: 'Resumen mensual' },
+  { key: 'tipos', group: 'Tablas', label: 'Distribución por tipo de actividad' },
+  { key: 'inst', group: 'Tablas', label: 'Instituciones con más registros (Top 10)' },
+  { key: 'act', group: 'Tablas', label: 'Actividades más registradas (Top 15)' },
+  { key: 'conclusion', group: 'Cierre', label: 'Conclusión y firma' },
+  { key: 'anexo', group: 'Cierre', label: 'Anexo con todos los registros del período', hint: 'Puede ocupar muchas páginas' },
+];
+const REP_SEL_KEY = 'creditos2025:reportSections';
+let __REP_PREVIEW = null; // { st, sel, imgs }
+
+function loadReportSelection() {
+  const all = Object.fromEntries(REP_SECTIONS.map(s => [s.key, true]));
+  try {
+    const saved = JSON.parse(localStorage.getItem(REP_SEL_KEY) || 'null');
+    if (saved && typeof saved === 'object') for (const k of Object.keys(all)) if (k in saved) all[k] = !!saved[k];
+  } catch {}
+  return all;
+}
+function saveReportSelection(sel) { try { localStorage.setItem(REP_SEL_KEY, JSON.stringify(sel)); } catch {} }
+
+function showOverlay(id, show) { document.getElementById(id)?.setAttribute('aria-hidden', show ? 'false' : 'true'); }
+
+function openReportConfig() {
+  if (!__REP_DATA) { showToast('Primero carga el reporte.', 'warn'); return; }
+  const sel = loadReportSelection();
+  const list = document.getElementById('repConfigList');
+  if (list) {
+    let html = '', group = '';
+    for (const s of REP_SECTIONS) {
+      if (s.group !== group) { group = s.group; html += `<div class="rep-config-group">${sanitize(group)}</div>`; }
+      html += `<label class="rep-check"><input type="checkbox" data-sec="${s.key}"${sel[s.key] ? ' checked' : ''}><span>${sanitize(s.label)}${s.hint ? `<small>${sanitize(s.hint)}</small>` : ''}</span></label>`;
+    }
+    list.innerHTML = html;
+  }
+  showOverlay('repConfigOverlay', true);
 }
 
-function openPrintWindow(html) {
-  const w = window.open('', '_blank');
-  if (!w) { showToast('Permite las ventanas emergentes para imprimir.', 'warn'); return null; }
-  w.document.open(); w.document.write(html); w.document.close();
-  return w;
+function readReportSelection() {
+  const sel = {};
+  document.querySelectorAll('#repConfigList input[data-sec]').forEach(cb => { sel[cb.getAttribute('data-sec')] = cb.checked; });
+  return sel;
 }
 
-function detailTableHtml(rows, opts = {}) {
-  const head = `<thead><tr><th>#</th><th>Correlativo</th><th>Ingreso</th><th>Fecha act.</th><th>Nombre</th><th>Colegiado</th><th>Actividad</th><th>Institución</th><th>Tipo</th><th>Horas</th><th>Créditos</th>${opts.estado ? '<th>Estado</th>' : ''}</tr></thead>`;
-  const body = rows.map((r, i) => `<tr><td>${i + 1}</td><td>${sanitize(r.correlativo)}</td><td>${r.created_at ? localDateStr(new Date(r.created_at)) : ''}</td><td>${sanitize(r.fecha)}</td><td>${sanitize(r.nombre)}</td><td>${sanitize(r.colegiado_numero)}</td><td>${sanitize(r.actividad)}</td><td>${sanitize(r.institucion)}</td><td>${sanitize(r.tipo)}</td><td>${fmtNum(r.horas, 1)}</td><td>${fmtNum(r.creditos, 2)}</td>${opts.estado ? `<td>${r.deleted_at ? 'Eliminado' : 'Activo'}</td>` : ''}</tr>`).join('');
-  return `<table class="detail">${head}<tbody>${body}</tbody></table>`;
-}
-
-function printReport() {
-  const st = __REP_DATA;
-  if (!st) { showToast('Primero carga el reporte.', 'warn'); return; }
-  const imgs = renderReportChartImages(st);
-  const includeDetail = document.getElementById('repIncludeDetail')?.checked;
-  const logo = __PDF_LOGO_DATAURL || new URL('./assets/Logo-cpg.png', location.href).href;
-  const today = fmtLongDate(localDateStr(new Date()));
+// Textos editables del informe, con el valor inicial que propone el sistema
+function reportTexts(st) {
   const periodo = `del ${fmtLongDate(st.from)} al ${fmtLongDate(st.to)}`;
   const basisTxt = st.basis === 'created_at' ? 'la fecha de ingreso de cada registro al sistema' : 'la fecha en que se realizó cada actividad';
   const tipoTxt = st.tipos.map(([k, v]) => `${k.toLowerCase()} (${fmtNum(v)}; ${fmtNum(st.total ? (v / st.total) * 100 : 0, 1)}%)`).join(', ');
-  const kpiRows = reportKpis(st).map(([l, v, s]) => `<tr><td>${sanitize(l)}</td><td><strong>${sanitize(v)}</strong></td><td>${sanitize(s)}</td></tr>`).join('');
-  const charts = Object.entries(imgs).map(([id, src]) => `<figure class="${id === 'chMonthly' || id === 'chInst' ? 'wide' : ''}"><img src="${src}" alt="${sanitize(REP_CHART_TITLES[id])}"><figcaption>${sanitize(REP_CHART_TITLES[id])}</figcaption></figure>`).join('');
-
-  const body = `
-<div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button><span>Puede hacer clic sobre el texto para editarlo antes de imprimir.</span></div>
-<div class="wrap" contenteditable="true">
-  <div class="head"><img src="${logo}" alt="CPG"><div><h1>Colegio de Psicólogos de Guatemala</h1><div>Sistema de Registro de Créditos Académicos</div></div></div>
-  <p style="text-align:right">Guatemala, ${sanitize(today)}</p>
-  <p>Señores<br><strong>Comisión de Acreditación y Educación Continua (CAEDUC)</strong><br><strong>Honorable Junta Directiva</strong><br>Colegio de Psicólogos de Guatemala<br>Presente</p>
-  <p><strong>Asunto:</strong> Informe estadístico de uso del Sistema de Registro de Créditos Académicos, período ${sanitize(periodo)}.</p>
-  <p>Estimados señores:</p>
-  <p>Por medio de la presente se somete a su consideración el informe estadístico de uso del Sistema de Registro de Créditos Académicos del Colegio de Psicólogos de Guatemala, correspondiente al período ${sanitize(periodo)}. Los datos fueron obtenidos directamente de la base de datos del sistema, considerando ${sanitize(basisTxt)}, e incluyen únicamente registros vigentes (se excluyen los registros eliminados).</p>
-
-  <h2>1. Indicadores generales</h2>
-  <table><thead><tr><th>Indicador</th><th>Valor</th><th>Descripción</th></tr></thead><tbody>${kpiRows}</tbody></table>
-
-  <h2>2. Análisis de uso</h2>
-  <p>Durante el período se registraron <strong>${fmtNum(st.total)}</strong> ingresos realizados por <strong>${fmtNum(st.uniqueUsers)}</strong> colegiados distintos, con un promedio de ${fmtNum(st.avgPerUser, 2)} registros por colegiado. De ellos, <strong>${fmtNum(st.recurrent)}</strong> (${fmtNum(st.recurrentPct, 1)}%) utilizaron el sistema en dos o más ocasiones, y <strong>${fmtNum(st.newUsers)}</strong> lo utilizaron por primera vez dentro del período.</p>
-  <p>El sistema tuvo actividad en ${fmtNum(st.activeMonths)} mes(es), con un promedio de ${fmtNum(st.avgPerMonth, 1)} ingresos por mes activo${st.peak?.count ? `; el mes de mayor uso fue ${sanitize(monthLabel(st.peak.key, true))} con ${fmtNum(st.peak.count)} ingresos` : ''}. Se acreditaron en total ${fmtNum(st.horas, 1)} horas, equivalentes a ${fmtNum(st.creditos, 2)} créditos académicos (Art. 16: 1 crédito = 16 horas).</p>
-  <p>Por tipo de actividad, la distribución fue: ${sanitize(tipoTxt || 'sin datos')}. Los registros provienen de ${fmtNum(st.instituciones)} instituciones formadoras y ${fmtNum(st.actividades)} actividades distintas; ${fmtNum(st.aula)} ingresos se importaron desde el Aula Virtual CPG y ${fmtNum(st.manual)} se realizaron mediante carga manual de constancia.</p>
-
-  <h2>3. Gráficas</h2>
-  <div class="charts">${charts || '<p>No fue posible generar las gráficas.</p>'}</div>
-
-  <h2>4. Resumen mensual</h2>
-  <table>${repMonthTableHtml(st)}</table>
-
-  <h2>5. Distribución por tipo de actividad</h2>
-  <table>${repSimpleTableHtml('Tipo de actividad', st.tipos, st.total)}</table>
-
-  <h2>6. Instituciones con más registros (Top 10)</h2>
-  <table>${repSimpleTableHtml('Institución', st.instTop, st.total)}</table>
-
-  <h2>7. Actividades más registradas (Top 15)</h2>
-  <table>${repActTableHtml(st)}</table>
-
-  <h2>8. Conclusión</h2>
-  <p>Los indicadores presentados evidencian el uso sostenido del sistema por parte de los colegiados como herramienta para registrar y acreditar su formación continua, así como su aporte a la trazabilidad y verificación de los créditos académicos. Con base en esta información, se somete a su consideración la continuidad y ampliación del proyecto.</p>
-  <p>Sin otro particular, me suscribo atentamente.</p>
-  <div class="sign"><div class="line"></div><div>Nombre y firma</div><div>Cargo</div></div>
-
-  ${includeDetail ? `<div class="annex"><h2>Anexo: detalle de registros del período (${fmtNum(st.rows.length)})</h2>${detailTableHtml(st.rows)}</div>` : ''}
-</div>`;
-  const css = `
-  .head{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1e3a8a;padding-bottom:10px;margin-bottom:12px}
-  .head img{height:64px}
-  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .charts figure{margin:0;break-inside:avoid;page-break-inside:avoid;border:1px solid #e5e7eb;padding:6px}
-  .charts figure.wide{grid-column:1 / -1}
-  .charts img{width:100%;height:auto;display:block}
-  figcaption{font-size:11px;text-align:center;color:#374151;margin-top:4px}
-  tr{break-inside:avoid;page-break-inside:avoid}
-  h2{break-after:avoid;page-break-after:avoid}
-  .sign{margin:60px 0 0;width:260px;text-align:center}.sign .line{border-top:1px solid #111;margin-bottom:4px}
-  .annex{break-before:page;page-break-before:always}
-  .detail{font-size:9px}.detail td,.detail th{padding:2px 4px}`;
-  openPrintWindow(printDocShell(`Informe de uso ${st.from} a ${st.to}`, body, css));
+  return {
+    fecha: `Guatemala, ${fmtLongDate(localDateStr(new Date()))}`,
+    dest: 'Señores\nComisión de Acreditación y Educación Continua (CAEDUC)\nHonorable Junta Directiva\nColegio de Psicólogos de Guatemala\nPresente',
+    asunto: `Asunto: Informe estadístico de uso del Sistema de Registro de Créditos Académicos, período ${periodo}.`,
+    saludo: 'Estimados señores:',
+    intro: `Por medio de la presente se somete a su consideración el informe estadístico de uso del Sistema de Registro de Créditos Académicos del Colegio de Psicólogos de Guatemala, correspondiente al período ${periodo}. Los datos fueron obtenidos directamente de la base de datos del sistema, considerando ${basisTxt}, e incluyen únicamente registros vigentes (se excluyen los registros eliminados).`,
+    an1: `Durante el período se registraron ${fmtNum(st.total)} ingresos realizados por ${fmtNum(st.uniqueUsers)} colegiados distintos, con un promedio de ${fmtNum(st.avgPerUser, 2)} registros por colegiado. De ellos, ${fmtNum(st.recurrent)} (${fmtNum(st.recurrentPct, 1)}%) utilizaron el sistema en dos o más ocasiones, y ${fmtNum(st.newUsers)} lo utilizaron por primera vez dentro del período.`,
+    an2: `El sistema tuvo actividad en ${fmtNum(st.activeMonths)} mes(es), con un promedio de ${fmtNum(st.avgPerMonth, 1)} ingresos por mes activo${st.peak?.count ? `; el mes de mayor uso fue ${monthLabel(st.peak.key, true)} con ${fmtNum(st.peak.count)} ingresos` : ''}. Se acreditaron en total ${fmtNum(st.horas, 1)} horas, equivalentes a ${fmtNum(st.creditos, 2)} créditos académicos (Art. 16: 1 crédito = 16 horas).`,
+    an3: `Por tipo de actividad, la distribución fue: ${tipoTxt || 'sin datos'}. Los registros provienen de ${fmtNum(st.instituciones)} instituciones formadoras y ${fmtNum(st.actividades)} actividades distintas; ${fmtNum(st.aula)} ingresos se importaron desde el Aula Virtual CPG y ${fmtNum(st.manual)} se realizaron mediante carga manual de constancia.`,
+    conc: 'Los indicadores presentados evidencian el uso sostenido del sistema por parte de los colegiados como herramienta para registrar y acreditar su formación continua, así como su aporte a la trazabilidad y verificación de los créditos académicos. Con base en esta información, se somete a su consideración la continuidad y ampliación del proyecto.',
+    despedida: 'Sin otro particular, me suscribo atentamente.',
+    firma: 'Nombre y firma\nCargo',
+  };
 }
 
-async function printRegistrosListado() {
-  const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }
-  // Abrir la ventana antes de la consulta para que el navegador no la bloquee
-  const w = window.open('', '_blank');
-  if (!w) { showToast('Permite las ventanas emergentes para imprimir.', 'warn'); return; }
-  w.document.write('<p style="font:14px system-ui;padding:20px">Cargando todos los registros…</p>');
-  const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
-  if (error) { w.close(); showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error'); return; }
-  const { from, to } = getAdminDateBounds();
-  const periodo = from || to ? `${fmtLongDate(from)} al ${fmtLongDate(to)}` : 'todos los registros';
-  const body = `<div class="toolbar"><button onclick="window.print()">Imprimir / Guardar PDF</button><span>${fmtNum(rows.length)} registro(s)</span></div>
-<div class="wrap" style="max-width:none"><h1>Registros de créditos académicos</h1><p>Período (fecha de actividad): ${sanitize(periodo)} · Total: ${fmtNum(rows.length)} registro(s)</p>${detailTableHtml(rows, { estado: true })}</div>`;
-  w.document.open();
-  w.document.write(printDocShell('Registros de créditos académicos', body, '@page{size:letter landscape}.detail{font-size:9px}.detail td,.detail th{padding:2px 4px}tr{break-inside:avoid}'));
-  w.document.close();
+// Tablas del informe como { head, body } (se usan tanto en la vista previa como en el PDF)
+function reportTables(st) {
+  const pct = v => `${st.total ? fmtNum((v / st.total) * 100, 1) : 0}%`;
+  return {
+    kpis: { head: ['Indicador', 'Valor', 'Descripción'], body: reportKpis(st) },
+    mensual: {
+      head: ['Mes', 'Ingresos', 'Usuarios únicos', 'Nuevos', 'Recurrentes', 'Horas', 'Créditos'],
+      body: st.monthly.map(m => [monthLabel(m.key, true), fmtNum(m.count), fmtNum(m.users), fmtNum(m.newUsers), fmtNum(m.returning), fmtNum(m.horas, 1), fmtNum(m.creditos, 2)]),
+      foot: ['Total', fmtNum(st.total), fmtNum(st.uniqueUsers), fmtNum(st.newUsers), fmtNum(st.returningUsers), fmtNum(st.horas, 1), fmtNum(st.creditos, 2)],
+    },
+    tipos: { head: ['Tipo de actividad', 'Ingresos', '%'], body: st.tipos.map(([k, v]) => [k, fmtNum(v), pct(v)]) },
+    inst: { head: ['Institución', 'Ingresos', '%'], body: st.instTop.map(([k, v]) => [k, fmtNum(v), pct(v)]) },
+    act: { head: ['#', 'Actividad', 'Ingresos', 'Usuarios', 'Horas'], body: st.actTop.map((a, i) => [String(i + 1), a.name, fmtNum(a.count), fmtNum(a.users), fmtNum(a.horas, 1)]) },
+  };
+}
+const REP_DETAIL_HEAD = ['#', 'Correlativo', 'Ingreso', 'Fecha act.', 'Nombre', 'Colegiado', 'Actividad', 'Institución', 'Tipo', 'Horas', 'Créditos'];
+function detailRow(r, i) {
+  return [String(i + 1), r.correlativo || '', r.created_at ? localDateStr(new Date(r.created_at)) : '', r.fecha || '', r.nombre || '', r.colegiado_numero || '', r.actividad || '', r.institucion || '', r.tipo || '', fmtNum(r.horas, 1), fmtNum(r.creditos, 2)];
+}
+function tableHtml(t) {
+  const row = (cells, tag) => `<tr>${cells.map(c => `<${tag}>${sanitize(c)}</${tag}>`).join('')}</tr>`;
+  return `<table><thead>${row(t.head, 'th')}</thead><tbody>${t.body.map(r => row(r, 'td')).join('') || `<tr><td colspan="${t.head.length}">Sin datos</td></tr>`}</tbody>${t.foot ? `<tfoot>${row(t.foot, 'th')}</tfoot>` : ''}</table>`;
+}
+
+// Títulos numerados según las secciones elegidas
+function reportHeadings(sel) {
+  const chartsOn = Object.keys(REP_CHART_TITLES).some(k => sel[k]);
+  const order = [['kpis', 'Indicadores generales'], ['analisis', 'Análisis de uso'], ['charts', 'Gráficas'], ['mensual', 'Resumen mensual'],
+    ['tipos', 'Distribución por tipo de actividad'], ['inst', 'Instituciones con más registros (Top 10)'], ['act', 'Actividades más registradas (Top 15)'], ['conclusion', 'Conclusión']];
+  const out = {}; let n = 0;
+  for (const [k, t] of order) if (k === 'charts' ? chartsOn : sel[k]) out[k] = `${++n}. ${t}`;
+  return out;
+}
+
+function buildReportPreview() {
+  const st = __REP_DATA; if (!st) return;
+  const sel = readReportSelection();
+  if (!Object.values(sel).some(Boolean)) { showToast('Marca al menos una sección.', 'warn'); return; }
+  saveReportSelection(sel);
+  const chartIds = Object.keys(REP_CHART_TITLES).filter(k => sel[k]);
+  const imgs = renderReportChartImages(st, chartIds);
+  const tx = reportTexts(st), tb = reportTables(st), hd = reportHeadings(sel);
+  const ed = (k, cls = '') => {
+    const html = k === 'dest'
+      ? tx.dest.split('\n').map(l => /Comisi|Junta/.test(l) ? `<strong>${sanitize(l)}</strong>` : sanitize(l)).join('\n')
+      : sanitize(tx[k]);
+    return `<p data-k="${k}" class="${cls}" contenteditable="true">${html}</p>`;
+  };
+  const logo = __PDF_LOGO_DATAURL || new URL('./assets/Logo-cpg.png', location.href).href;
+  let h = `<div class="rp-head"><img src="${logo}" alt="CPG"><div><h1>Colegio de Psicólogos de Guatemala</h1><div>Sistema de Registro de Créditos Académicos</div></div></div>`;
+  if (sel.carta) h += ed('fecha', 'rp-right') + ed('dest') + ed('asunto') + ed('saludo') + ed('intro');
+  else h += `<p><strong>Informe de uso: ${sanitize(fmtLongDate(st.from))} al ${sanitize(fmtLongDate(st.to))}</strong></p>`;
+  if (hd.kpis) h += `<h2>${hd.kpis}</h2>${tableHtml(tb.kpis)}`;
+  if (hd.analisis) h += `<h2>${hd.analisis}</h2>` + ed('an1') + ed('an2') + ed('an3');
+  if (hd.charts) h += `<h2>${hd.charts}</h2><div class="rp-charts">${chartIds.map(id => imgs[id] ? `<figure class="${REP_WIDE_CHARTS.includes(id) ? 'wide' : ''}"><img src="${imgs[id].src}" alt="${sanitize(REP_CHART_TITLES[id])}"><figcaption>${sanitize(REP_CHART_TITLES[id])}</figcaption></figure>` : '').join('')}</div>`;
+  for (const k of ['mensual', 'tipos', 'inst', 'act']) if (hd[k]) h += `<h2>${hd[k]}</h2>${tableHtml(tb[k])}`;
+  if (hd.conclusion) h += `<h2>${hd.conclusion}</h2>` + ed('conc') + ed('despedida') + `<div class="rp-sign"><div class="line"></div><p data-k="firma" contenteditable="true">${sanitize(tx.firma)}</p></div>`;
+  if (sel.anexo) h += `<h2>Anexo: detalle de registros del período (${fmtNum(st.rows.length)})</h2>${tableHtml({ head: REP_DETAIL_HEAD, body: st.rows.map(detailRow) })}`;
+  const paper = document.getElementById('repPaper');
+  if (paper) paper.innerHTML = h;
+  __REP_PREVIEW = { st, sel, imgs, chartIds, tables: tb, headings: hd, defaults: tx };
+  showOverlay('repConfigOverlay', false);
+  showOverlay('repPreviewOverlay', true);
+  document.querySelector('#repPreviewOverlay .rep-preview-scroll')?.scrollTo(0, 0);
+}
+
+// Texto actual (posiblemente editado) de un bloque de la vista previa
+function previewText(k) {
+  const el = document.querySelector(`#repPaper [data-k="${k}"]`);
+  const v = el ? el.innerText : __REP_PREVIEW?.defaults?.[k];
+  return String(v || '').replace(/ /g, ' ').trim();
+}
+
+function getJsPDF() {
+  const J = window.jspdf?.jsPDF;
+  if (!J) { showToast('No se pudo cargar el generador de PDF. Recarga la página.', 'error'); return null; }
+  if (!J.API?.autoTable) { showToast('No se pudo cargar el módulo de tablas del PDF. Recarga la página.', 'error'); return null; }
+  return J;
+}
+
+// Agrega "Página X de N" a todas las páginas
+function pdfFooter(doc, label) {
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i);
+    const w = doc.internal.pageSize.getWidth(), h = doc.internal.pageSize.getHeight();
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(107, 114, 128);
+    doc.text(label, 40, h - 22);
+    doc.text(`Página ${i} de ${n}`, w - 40, h - 22, { align: 'right' });
+  }
+}
+
+async function downloadReportPdf() {
+  const pv = __REP_PREVIEW; if (!pv) return;
+  const JsPDF = getJsPDF(); if (!JsPDF) return;
+  const btn = document.getElementById('repDownloadPdf');
+  const btnTxt = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando PDF…'; }
+  await new Promise(r => setTimeout(r, 30)); // deja que el botón se actualice
+  try {
+    const { st, sel, imgs, chartIds, tables: tb, headings: hd } = pv;
+    const doc = new JsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait', compress: true });
+    const M = 50, W = doc.internal.pageSize.getWidth(), CW = W - 2 * M;
+    const pageH = () => doc.internal.pageSize.getHeight();
+    let y = M;
+    const ensure = h => { if (y + h > pageH() - M) { doc.addPage(); y = M; } };
+    const text = (str, { size = 11, bold = false, align = 'left', gap = 8, boldIf = null } = {}) => {
+      doc.setFontSize(size); doc.setTextColor(17, 24, 39);
+      const lh = size * 1.4;
+      for (const para of String(str).split('\n')) {
+        doc.setFont('times', bold || (boldIf && boldIf.test(para)) ? 'bold' : 'normal');
+        const lines = para ? doc.splitTextToSize(para, CW) : [''];
+        for (const ln of lines) { ensure(lh); doc.text(ln, align === 'right' ? W - M : M, y + size, { align }); y += lh; }
+      }
+      y += gap;
+    };
+    const h2 = str => {
+      ensure(60);
+      y += 6; text(str, { size: 13, bold: true, gap: 0 });
+      doc.setDrawColor(209, 213, 219); doc.setLineWidth(0.8); doc.line(M, y, W - M, y); y += 10;
+    };
+    const table = (t, opts = {}) => {
+      doc.autoTable({
+        head: [t.head], body: t.body, foot: t.foot ? [t.foot] : undefined, startY: y,
+        margin: { left: M, right: M, top: M, bottom: M }, theme: 'grid',
+        styles: { font: 'helvetica', fontSize: 9, cellPadding: 4, overflow: 'linebreak', textColor: [17, 24, 39], lineColor: [209, 213, 219] },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+        footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontStyle: 'bold' },
+        showFoot: 'lastPage', ...opts,
+      });
+      y = doc.lastAutoTable.finalY + 14;
+    };
+
+    // Encabezado con logo
+    const logo = __PDF_LOGO_DATAURL || await ensurePdfLogoDataUrl().catch(() => null);
+    if (logo) {
+      try { const p = doc.getImageProperties(logo); const lh = 58; doc.addImage(logo, 'PNG', M, y, lh * p.width / p.height, lh, undefined, 'FAST'); } catch {}
+    }
+    doc.setFont('times', 'bold'); doc.setFontSize(16); doc.setTextColor(17, 24, 39);
+    doc.text('Colegio de Psicólogos de Guatemala', M + 90, y + 26);
+    doc.setFont('times', 'normal'); doc.setFontSize(11);
+    doc.text('Sistema de Registro de Créditos Académicos', M + 90, y + 44);
+    y += 66; doc.setDrawColor(30, 58, 138); doc.setLineWidth(2); doc.line(M, y, W - M, y); y += 16;
+
+    if (sel.carta) {
+      text(previewText('fecha'), { align: 'right' });
+      text(previewText('dest'), { boldIf: /Comisi|Junta/ });
+      text(previewText('asunto'));
+      text(previewText('saludo'));
+      text(previewText('intro'));
+    } else {
+      text(`Informe de uso: ${fmtLongDate(st.from)} al ${fmtLongDate(st.to)}`, { bold: true, size: 12 });
+    }
+    if (hd.kpis) { h2(hd.kpis); table(tb.kpis, { columnStyles: { 1: { fontStyle: 'bold' } } }); }
+    if (hd.analisis) { h2(hd.analisis); ['an1', 'an2', 'an3'].forEach(k => text(previewText(k))); }
+    if (hd.charts) {
+      h2(hd.charts);
+      const gap = 12, halfW = (CW - gap) / 2;
+      let pending = null; // gráfica en la columna izquierda esperando pareja
+      const place = (img, x, w, title) => {
+        const ih = w * img.h / img.w;
+        doc.addImage(img.src, 'JPEG', x, y, w, ih);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(55, 65, 81);
+        doc.text(title, x + w / 2, y + ih + 12, { align: 'center', maxWidth: w });
+        return ih + 22;
+      };
+      for (const id of chartIds) {
+        const img = imgs[id]; if (!img) continue;
+        if (REP_WIDE_CHARTS.includes(id)) {
+          if (pending) { y += pending; pending = null; }
+          const ih = CW * img.h / img.w + 22; ensure(ih);
+          y += place(img, M, CW, REP_CHART_TITLES[id]);
+        } else if (pending === null) {
+          const ih = halfW * img.h / img.w + 22; ensure(ih);
+          pending = place(img, M, halfW, REP_CHART_TITLES[id]);
+        } else {
+          pending = Math.max(pending, place(img, M + halfW + gap, halfW, REP_CHART_TITLES[id]));
+          y += pending; pending = null;
+        }
+      }
+      if (pending) y += pending;
+      y += 6;
+    }
+    for (const k of ['mensual', 'tipos', 'inst', 'act']) if (hd[k]) { h2(hd[k]); table(tb[k]); }
+    if (hd.conclusion) {
+      h2(hd.conclusion); text(previewText('conc')); text(previewText('despedida'));
+      ensure(90); y += 50;
+      doc.setDrawColor(17, 24, 39); doc.setLineWidth(0.8); doc.line(M, y, M + 200, y); y += 4;
+      const firma = previewText('firma').split('\n');
+      doc.setFont('times', 'normal'); doc.setFontSize(11);
+      firma.forEach(l => { y += 15; doc.text(l, M + 100, y, { align: 'center' }); });
+      y += 14;
+    }
+    if (sel.anexo) {
+      doc.addPage(); y = M;
+      h2(`Anexo: detalle de registros del período (${fmtNum(st.rows.length)})`);
+      table({ head: REP_DETAIL_HEAD, body: st.rows.map(detailRow) }, {
+        styles: { font: 'helvetica', fontSize: 6.5, cellPadding: 2, overflow: 'linebreak', textColor: [17, 24, 39], lineColor: [209, 213, 219] },
+        headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 7 },
+      });
+    }
+    pdfFooter(doc, `Informe de uso del Sistema de Registro de Créditos Académicos · ${fmtLongDate(st.from)} al ${fmtLongDate(st.to)}`);
+    savePdfMobile(doc, `informe-uso-creditos_${st.from}_a_${st.to}.pdf`);
+    showToast('PDF generado.', 'info');
+  } catch (e) {
+    console.error(e);
+    showToast('No se pudo generar el PDF: ' + (e?.message || e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btnTxt; }
+  }
+}
+
+async function downloadRegistrosPdf() {
+  const JsPDF = getJsPDF(); if (!JsPDF) return;
+  const btn = document.getElementById('printRegistros');
+  const btnTxt = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando PDF…'; }
+  try {
+    const { data: rows, error } = await fetchAllRows(buildAdminRegistrosQuery);
+    if (error) { showToast('No se pudieron cargar registros: ' + sbErrMsg(error), 'error'); return; }
+    if (!rows.length) { showToast('Sin registros en el período.', 'warn'); return; }
+    const { from, to } = getAdminDateBounds();
+    const periodo = from || to ? `${fmtLongDate(from)} al ${fmtLongDate(to)}` : 'todos los registros';
+    const doc = new JsPDF({ unit: 'pt', format: 'letter', orientation: 'landscape', compress: true });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(17, 24, 39);
+    doc.text('Registros de créditos académicos', 40, 46);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(`Período (fecha de actividad): ${periodo} · Total: ${fmtNum(rows.length)} registro(s)`, 40, 64);
+    doc.autoTable({
+      head: [[...REP_DETAIL_HEAD, 'Estado']],
+      body: rows.map((r, i) => [...detailRow(r, i), r.deleted_at ? 'Eliminado' : 'Activo']),
+      startY: 76, margin: { left: 40, right: 40, top: 40, bottom: 40 }, theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 2.5, overflow: 'linebreak', textColor: [17, 24, 39], lineColor: [209, 213, 219] },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255 },
+    });
+    pdfFooter(doc, `Registros de créditos académicos · ${periodo}`);
+    savePdfMobile(doc, `registros_cpg_${from || 'inicio'}_a_${to || 'hoy'}.pdf`);
+    if (exportStatus) exportStatus.textContent = `PDF descargado (${fmtNum(rows.length)} registros)`;
+  } catch (e) {
+    console.error(e);
+    showToast('No se pudo generar el PDF: ' + (e?.message || e), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btnTxt; }
+  }
 }
 
 ['repYear'].forEach(id => document.getElementById(id)?.addEventListener('change', () => {
@@ -2335,8 +2538,15 @@ async function printRegistrosListado() {
 }));
 ['repFrom', 'repTo', 'repBasis'].forEach(id => document.getElementById(id)?.addEventListener('change', () => renderReport()));
 document.getElementById('repRefresh')?.addEventListener('click', () => renderReport());
-document.getElementById('repPrint')?.addEventListener('click', () => printReport());
-document.getElementById('printRegistros')?.addEventListener('click', () => printRegistrosListado());
+document.getElementById('repPrint')?.addEventListener('click', () => openReportConfig());
+document.getElementById('repSelAll')?.addEventListener('click', () => document.querySelectorAll('#repConfigList input[data-sec]').forEach(cb => { cb.checked = true; }));
+document.getElementById('repSelNone')?.addEventListener('click', () => document.querySelectorAll('#repConfigList input[data-sec]').forEach(cb => { cb.checked = false; }));
+document.getElementById('repConfigGo')?.addEventListener('click', () => buildReportPreview());
+['repConfigClose', 'repConfigCancel'].forEach(id => document.getElementById(id)?.addEventListener('click', () => showOverlay('repConfigOverlay', false)));
+document.getElementById('repPreviewBack')?.addEventListener('click', () => { showOverlay('repPreviewOverlay', false); openReportConfig(); });
+document.getElementById('repPreviewClose')?.addEventListener('click', () => showOverlay('repPreviewOverlay', false));
+document.getElementById('repDownloadPdf')?.addEventListener('click', () => downloadReportPdf());
+document.getElementById('printRegistros')?.addEventListener('click', () => downloadRegistrosPdf());
 
 /* Gestión de usuarios (superadmin) */
 userCheckBtn?.addEventListener('click', async () => {
