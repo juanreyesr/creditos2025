@@ -3183,25 +3183,51 @@ async function loadAulaVirtualCerts() {
     .eq('collegiate_number', colegiadoNum)
     .order('issued_at', { ascending: false });
   if (error) { if (avStatus) avStatus.textContent = 'Error: ' + error.message; return; }
-  const codes = (certs || []).map(c => c.certificate_code).filter(Boolean);
-  let importedHashes = new Set();
-  if (codes.length) {
-    // Detección de imports previos: por colegiado_numero (cubre cuentas auth duplicadas)
-    let impQ = sb.from('registros').select('hash').in('hash', codes);
-    impQ = colegiadoNum ? impQ.eq('colegiado_numero', colegiadoNum) : impQ.eq('usuario_id', user.id);
-    const { data: imp } = await impQ;
-    (imp || []).forEach(r => { if (r.hash) importedHashes.add(r.hash); });
+  // Los certificados se suman solos: la base de datos los registra al emitirse en el aula
+  // y aquí se completan los que falten (p. ej. emitidos antes de crear el perfil).
+  // Los que el usuario retiró no se vuelven a agregar.
+  if ((certs || []).length) {
+    const { data: agregados, error: syncErr } = await sb.rpc('creditos_sincronizar_aula');
+    if (syncErr) console.warn('[aula] sincronización:', syncErr.message);
+    else if (agregados > 0) {
+      showToast(agregados === 1
+        ? 'Se agregó 1 certificado del Aula Virtual a tu registro.'
+        : `Se agregaron ${agregados} certificados del Aula Virtual a tu registro.`, 'info');
+      await loadAndRender();
+    }
   }
-  __AV_CERTS = certs || [];
-  __AV_IMPORTED_HASHES = importedHashes;
-  renderAvCerts();
+  await refreshAvEstado(certs || [], colegiadoNum, user.id);
   if (avResults) avResults.style.display = __AV_CERTS.length ? '' : 'none';
-  const pending = __AV_CERTS.filter(c => !__AV_IMPORTED_HASHES.has(c.certificate_code)).length;
   if (avStatus) avStatus.textContent = __AV_CERTS.length
     ? `${__AV_CERTS.length} certificado(s) — Colegiado ${colegiadoNum}`
     : `Sin certificados en el Aula Virtual para el colegiado ${colegiadoNum}.`;
+}
+
+// Estado de cada certificado en el registro: hash → { id, retirado }
+let __AV_ESTADO = new Map();
+async function refreshAvEstado(certs, colegiadoNum, userId) {
+  const sb = getSupabaseClient(); if (!sb) return;
+  const codes = (certs || []).map(c => c.certificate_code).filter(Boolean);
+  const estado = new Map();
+  if (codes.length) {
+    // Por colegiado_numero (cubre cuentas auth duplicadas); incluye los retirados.
+    let q = sb.from('registros').select('id, hash, deleted_at').in('hash', codes);
+    q = colegiadoNum ? q.eq('colegiado_numero', colegiadoNum) : q.eq('usuario_id', userId);
+    const { data } = await q;
+    (data || []).forEach(r => {
+      if (!r.hash) return;
+      const prev = estado.get(r.hash);
+      // Si hubiera más de una fila, manda la activa.
+      if (!prev || (prev.retirado && !r.deleted_at)) estado.set(r.hash, { id: r.id, retirado: !!r.deleted_at });
+    });
+  }
+  __AV_CERTS = certs || [];
+  __AV_ESTADO = estado;
+  __AV_IMPORTED_HASHES = new Set([...estado.entries()].filter(([, v]) => !v.retirado).map(([k]) => k));
+  renderAvCerts();
+  const retirados = [...estado.values()].filter(v => v.retirado).length;
   const countBadge = document.getElementById('avCountBadge');
-  if (countBadge) countBadge.textContent = pending > 0 ? ` (${pending} por importar)` : '';
+  if (countBadge) countBadge.textContent = retirados > 0 ? ` (${retirados} retirado${retirados === 1 ? '' : 's'})` : '';
 }
 
 function renderAvCerts() {
@@ -3209,27 +3235,55 @@ function renderAvCerts() {
   if (!tbody) return;
   tbody.innerHTML = '';
   __AV_CERTS.forEach(cert => {
-    const imported = __AV_IMPORTED_HASHES.has(cert.certificate_code);
     const horas = Number(cert.video_duration) || '—';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td title="${sanitize(cert.video_title)}">${sanitize(cert.video_title.slice(0, 40))}${cert.video_title.length > 40 ? '…' : ''}</td>
       <td>${cert.issued_at ? cert.issued_at.slice(0, 10) : '—'}</td>
       <td>${horas !== '—' ? horas + ' h' : '—'}</td>
-      <td>${imported
-        ? '<span class="muted" style="font-size:13px">✓ Ya importado</span>'
-        : `<button class="btn" data-cert="${sanitize(cert.certificate_code)}" data-av-import type="button" style="padding:4px 10px;font-size:13px">Importar</button>`
-      }</td>`;
+      <td>${(() => {
+        const est = __AV_ESTADO.get(cert.certificate_code);
+        const code = sanitize(cert.certificate_code);
+        if (est && !est.retirado) return `<span class="muted" style="font-size:13px;display:block;margin-bottom:4px">✓ En tu registro</span>`
+          + `<button class="btn warn" data-cert="${code}" data-av-accion="retirar" type="button" style="padding:4px 10px;font-size:13px">Retirar</button>`;
+        if (est && est.retirado) return `<span class="muted" style="font-size:13px;display:block;margin-bottom:4px">Retirado</span>`
+          + `<button class="btn" data-cert="${code}" data-av-accion="restaurar" type="button" style="padding:4px 10px;font-size:13px">Agregar de nuevo</button>`;
+        return `<button class="btn" data-cert="${code}" data-av-accion="restaurar" type="button" style="padding:4px 10px;font-size:13px">Agregar</button>`;
+      })()}</td>`;
     tbody.appendChild(tr);
   });
 }
 
 document.getElementById('avCertsBody')?.addEventListener('click', async e => {
-  const btn = e.target.closest('[data-av-import]');
+  const btn = e.target.closest('[data-av-accion]');
   if (!btn) return;
   const certCode = btn.dataset.cert;
-  btn.disabled = true; btn.textContent = 'Importando…';
-  await importAvCert(certCode);
+  const accion = btn.dataset.avAccion;
+  const est = __AV_ESTADO.get(certCode);
+  const cert = __AV_CERTS.find(c => c.certificate_code === certCode);
+  const sb = getSupabaseClient();
+  if (!sb || !cert) return;
+  if (accion === 'retirar') {
+    if (!est || est.retirado) return;
+    const ok = confirm(`¿Retirar "${cert.video_title}" de tu registro de créditos?\n\nPodrás volver a agregarlo cuando quieras.`);
+    if (!ok) return;
+    btn.disabled = true; btn.textContent = 'Retirando…';
+    const { error } = await sb.from('registros').update({ deleted_at: new Date().toISOString() }).eq('id', est.id);
+    if (error) { showToast('No se pudo retirar: ' + sbErrMsg(error), 'error'); renderAvCerts(); return; }
+    showToast('Certificado retirado de tu registro.', 'info');
+  } else if (accion === 'restaurar') {
+    btn.disabled = true; btn.textContent = 'Agregando…';
+    if (est?.id) {
+      const { error } = await sb.from('registros').update({ deleted_at: null }).eq('id', est.id);
+      if (error) { showToast('No se pudo agregar: ' + sbErrMsg(error), 'error'); renderAvCerts(); return; }
+    } else {
+      await importAvCert(certCode);
+      return;
+    }
+    showToast('Certificado agregado de nuevo a tu registro.', 'info');
+  } else return;
+  await loadAndRender();
+  await refreshAvEstado(__AV_CERTS, __USER_PROFILE?.colegiado_numero || '', __CACHED_SESSION?.user?.id);
 });
 
 // Modal mínimo para pedir SOLO los campos faltantes del perfil (primera importación)
@@ -3331,8 +3385,7 @@ async function importAvCert(certCode) {
   };
   const { error } = await sb.from('registros').insert(payload);
   if (error) { showToast('Error al importar: ' + sbErrMsg(error), 'error'); renderAvCerts(); return; }
-  __AV_IMPORTED_HASHES.add(cert.certificate_code);
-  renderAvCerts();
-  showToast('¡Certificado importado correctamente!', 'info');
+  showToast('Certificado agregado a tu registro.', 'info');
   await loadAndRender();
+  await refreshAvEstado(__AV_CERTS, colegiadoNum, user.id);
 }

@@ -55,7 +55,10 @@ body{margin:0;background:linear-gradient(180deg,#0b1020,#0f172a);color:var(--tex
 .admin-hidden-button:hover{opacity:.4}
 
 /* ===== CONTAINER / CARDS ===== */
-.container{max-width:1100px;margin:24px auto;padding:0 16px;display:grid;gap:20px}
+.container{max-width:1100px;margin:24px auto;padding:0 16px;display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
+/* Evita que una tabla ancha (celdas sin salto de línea) ensanche toda la página en el
+   celular: la tabla se desplaza dentro de su recuadro y el resto se ajusta a la pantalla. */
+.container > *{min-width:0}
 .card{
   background:var(--card);border:1px solid var(--border);
   border-radius:var(--radius);padding:20px;
@@ -512,4 +515,15 @@ body.admin-mode #adminSection .admin-tab-panel{ flex:1; overflow:auto; padding:1
   .rep-paper{padding:20px 16px;font-size:13px}
   .rep-paper .rp-charts{grid-template-columns:1fr}
   .rep-preview-hint{order:3;flex-basis:100%}
+}
+
+/* Tablas del usuario en el celular: el texto puede saltar de línea y los botones se
+   apilan, para que quepan sin tener que desplazarse tanto hacia los lados. */
+@media (max-width:640px){
+  #tablaRegistros th,#tablaRegistros td,
+  #aulavirtualSection .table th,#aulavirtualSection .table td{white-space:normal;padding:8px 6px;font-size:13px}
+  #tablaRegistros td:first-child{word-break:break-all;min-width:84px}
+  #tablaRegistros td:last-child{display:flex;flex-direction:column;gap:4px}
+  #tablaRegistros td:last-child .btn,#aulavirtualSection .table .btn{padding:4px 8px;font-size:12px}
+  .stats-bar{flex-wrap:wrap}
 }
