@@ -19,7 +19,41 @@ function getSupabaseClient() {
   }
 }
 
+/* SSO entre apps: la otra app (Aula Virtual) manda un código de un solo uso en el
+   hash (#sso_th=...). Se canjea aquí por una sesión PROPIA de créditos; ya no se
+   comparte el refresh token entre dominios (compartirlo hacía que Supabase cerrara
+   la sesión en ambas apps al detectar su reutilización). */
+const SSO_PARAM = 'sso_th';
+const __SSO_LISTO = (async () => {
+  try {
+    const tokenHash = new URLSearchParams(window.location.hash.slice(1)).get(SSO_PARAM);
+    if (!tokenHash) return;
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    const sb = getSupabaseClient();
+    if (!sb) return;
+    const { data, error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' });
+    if (error) console.warn('[SSO] Código no válido o vencido:', error.message);
+    else __CACHED_SESSION = data?.session || __CACHED_SESSION;
+  } catch (e) { console.warn('[SSO]', e?.message || e); }
+})();
+
+async function pedirCodigoSSO() {
+  try {
+    const sb = getSupabaseClient();
+    if (!sb) return null;
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return null;
+    const { data, error } = await sb.functions.invoke('sso-enlace', { method: 'POST', body: {} });
+    if (error) throw error;
+    return data?.token_hash || null;
+  } catch (e) {
+    console.warn('[SSO] No se pudo obtener el código:', e?.message || e);
+    return null;
+  }
+}
+
 async function getCurrentUser() {
+  try { await __SSO_LISTO; } catch {}
   if (__CACHED_SESSION?.user) return __CACHED_SESSION.user;
   try {
     const sb = getSupabaseClient();
@@ -471,26 +505,10 @@ aulaVirtualNavBtn?.addEventListener('click', async () => {
   const colegiado = __USER_PROFILE?.colegiado_numero || '';
   const nombre = __USER_PROFILE?.nombre || '';
   const query = colegiado ? `?sso_colegiado=${encodeURIComponent(colegiado)}&sso_nombre=${encodeURIComponent(nombre)}` : '';
-  // Garantía de navegación: pase lo que pase, salimos a la otra app.
-  // Si conseguimos un access_token, lo enviamos por el hash para SSO.
-  try {
-    let session = null;
-    const sb = getSupabaseClient();
-    if (sb) {
-      try {
-        ({ data: { session } } = await sb.auth.getSession());
-        if (!session) {
-          try { await sb.auth.refreshSession(); } catch {}
-          ({ data: { session } } = await sb.auth.getSession());
-        }
-      } catch {}
-    }
-    if (session) {
-      const hash = `access_token=${session.access_token}&refresh_token=${session.refresh_token}&token_type=bearer&expires_in=${session.expires_in || 3600}&type=magiclink`;
-      window.location.href = `${base}${query}#${hash}`;
-      return;
-    }
-  } catch (e) { console.warn('[aula-nav]', e); }
+  // El aula recibe un código de un solo uso y abre su PROPIA sesión (no se le pasa
+  // la de créditos). Si no se consigue el código, navegamos igual.
+  const codigo = await pedirCodigoSSO();
+  if (codigo) { window.location.href = `${base}${query}#${SSO_PARAM}=${encodeURIComponent(codigo)}`; return; }
   window.location.href = `${base}${query}`;
 });
 
