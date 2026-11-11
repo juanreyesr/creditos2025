@@ -35,7 +35,6 @@ async function getCurrentUser() {
 /* =======================================================
    Config / Utils
 ======================================================= */
-const ADMIN_PASSWORD = "CAEDUC2025";
 const MAX_FILE_MB = 10;
 const ALLOWED_MIME = ["application/pdf","image/png","image/jpeg","image/jpg"];
 
@@ -354,8 +353,6 @@ const adminModal = document.getElementById('adminModal');
 const openAdminBtn = document.getElementById('openAdminBtn');
 const closeAdmin = document.getElementById('closeAdmin');
 const adminAuth = document.getElementById('adminAuth');
-const adminPass = document.getElementById('adminPass');
-const adminLogin = document.getElementById('adminLogin');
 const adminTbody = document.querySelector('#adminTable tbody');
 const exportCSVBtn = document.getElementById('exportCSV');
 const exportXLSXBtn = document.getElementById('exportXLSX');
@@ -656,7 +653,7 @@ function updateAdminBadge() {
     adminModeBadge.textContent = 'Superadmin';
     adminModeBadge.className = 'admin-mode-badge';
   } else {
-    adminModeBadge.textContent = 'Admin local';
+    adminModeBadge.textContent = 'Admin del aula';
     adminModeBadge.className = 'admin-mode-badge local';
   }
 }
@@ -702,7 +699,7 @@ document.getElementById('resumeAdminBtn')?.addEventListener('click', () => {
 // Botón "Admin" — entrada directa para usuarios verificados en cpg_admin_users (sin PIN)
 document.getElementById('enterAdminBtn')?.addEventListener('click', () => {
   if (!__ADMIN_ROLE_FROM_AULA) { openAdmin(); return; }
-  // super_admin del aula = superadmin en créditos. admin del aula = admin local.
+  // super_admin del aula = superadmin en créditos. admin del aula = admin (sin funciones de superadmin).
   isSuperAdmin = (__ADMIN_ROLE_FROM_AULA === 'super_admin');
   __ADMIN_ACTIVE = true;
   updateAdminBadge();
@@ -715,7 +712,6 @@ document.getElementById('enterAdminBtn')?.addEventListener('click', () => {
 // Open admin → show auth modal
 function openAdmin() {
   openModal(adminModal);
-  if (adminPass) adminPass.value = '';
   if (adminState) adminState.textContent = '—';
 }
 
@@ -729,18 +725,8 @@ window.addEventListener('keydown', e => {
 
 let currentAdminFilter = null;
 
-adminLogin?.addEventListener('click', async ev => {
-  ev.preventDefault();
-  if ((adminPass?.value || '').trim() !== ADMIN_PASSWORD) { showToast('Contraseña incorrecta', 'error'); return; }
-  isSuperAdmin = false;
-  __ADMIN_ACTIVE = true;
-  updateAdminBadge();
-  closeModal(adminModal);
-  openAdminSection();
-  showAdminTab('reporte');
-  updateResumeAdminBtn();
-  showToast('Sesión admin local iniciada');
-});
+// El acceso con PIN local se retiró: su contraseña quedaba visible en el código de la página.
+// Al panel se entra como superadmin (cuenta con perfiles.is_admin) o como admin del aula.
 
 superLogin?.addEventListener('click', async () => {
   const sb = getSupabaseClient(); if (!sb) { showToast('Supabase no disponible.', 'error'); return; }

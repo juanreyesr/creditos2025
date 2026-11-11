@@ -268,7 +268,7 @@
         <div class="admin-section-title">
           <span class="nav-icon">🛡️</span>
           <h2>Panel de Administración</h2>
-          <span class="admin-mode-badge" id="adminModeBadge">Admin local</span>
+          <span class="admin-mode-badge" id="adminModeBadge">Admin del aula</span>
         </div>
         <button class="btn nav-btn" id="exitAdminBtn" type="button" style="border-color:#ef4444;color:#ef4444" title="Termina la sesión administrativa (no cierra tu sesión de usuario)">
           <span class="nav-icon">🚪</span> Cerrar sesión administrativa
@@ -470,16 +470,7 @@
         <button class="iconbtn" id="closeAdmin" type="button">✕</button>
       </header>
       <div style="padding:16px 20px">
-        <!-- Login admin local por PIN -->
         <div id="adminAuth">
-          <p>Ingrese contraseña de administrador (PIN local):</p>
-          <input type="password" id="adminPass" placeholder="•••••" />
-          <div class="actions">
-            <button class="btn primary" id="adminLogin" type="button">Ingresar</button>
-          </div>
-
-          <hr style="border-color:var(--border);margin:18px 0"/>
-
           <h4 style="margin:0 0 8px">Entrar como superadmin</h4>
           <p class="muted" style="margin:0 0 10px">Necesita un usuario con validación de superadministrador registrado en CAEDUC</p>
           <label>Correo
