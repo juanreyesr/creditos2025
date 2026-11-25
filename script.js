@@ -921,7 +921,7 @@ function habilitarFormulario(habilitar) {
 
 function guardarVerificacionLocal(numero, data) {
   try {
-    const payload = { numero, nombre: data.nombre||'', estatus: data.estatus||'', fecha_colegiacion: data.fecha_colegiacion||'', ultimo_pago: data.ultimo_pago||'', ts: Date.now() };
+    const payload = { numero, nombre: data.nombre||'', estatus: data.estatus||'', fecha_colegiacion: data.fecha_colegiacion||'', ultimo_pago: data.ultimo_pago||'', activo_hasta: data.activo_hasta||'', carrera: data.carrera||'', estado_cpg: data.estado_cpg||'', ts: Date.now() };
     localStorage.setItem('cpg_colegiado_verificado', JSON.stringify(payload));
   } catch {}
 }
@@ -953,6 +953,9 @@ function aplicarResultadoVerificacion(numero, data, fromCache) {
   if (fromCache) html += `<span style="font-size:11px;color:var(--muted)">(verificación en caché)</span>`;
   html += `</div>`;
   if (data.nombre) html += `<div class="info-row"><span class="info-label">Nombre:</span><span class="info-value">${sanitize(data.nombre)}</span></div>`;
+  if (data.carrera) html += `<div class="info-row"><span class="info-label">Profesión:</span><span class="info-value">${sanitize(data.carrera)}</span></div>`;
+  if (data.activo_hasta) html += `<div class="info-row"><span class="info-label">Activo hasta:</span><span class="info-value">${sanitize(data.activo_hasta)}</span></div>`;
+  if ((data.estado_cpg || '').toUpperCase() === 'EXENTO') html += `<div class="info-row"><span class="info-label">Estado en el CPG:</span><span class="info-value">Exento</span></div>`;
   if (data.fecha_colegiacion) html += `<div class="info-row"><span class="info-label">Fecha colegiación:</span><span class="info-value">${sanitize(data.fecha_colegiacion)}</span></div>`;
   if (data.ultimo_pago) html += `<div class="info-row"><span class="info-label">Último pago:</span><span class="info-value">${sanitize(data.ultimo_pago)}</span></div>`;
   if (!isActivo) html += `<p style="margin:10px 0 0;color:#fca5a5;font-size:13px">⚠️ Tu estatus aparece como <strong>INACTIVO</strong> en la base del Colegio. Si crees que es un error, contacta al CPG.</p>`;
